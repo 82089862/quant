@@ -1,0 +1,15 @@
+[project]
+name = "quant"
+version = "0.1.0"
+description = "A 股日频回测最小系统"
+requires-python = ">=3.12"
+dependencies = [
+    "akshare>=1.19",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "duckdb>=1.0",
+    "baostock>=0.9.4",
+]
+
+[tool.uv]
+package = false
