@@ -36,7 +36,7 @@ quant/
   universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
   doc/
     研究方法与验证协议.md       证伪型测试的共同逻辑（四个环节 + 已实测失败案例总表）
-    假设登记表.md               假设卡模板 + 死因码查重器 + 出口清单
+    假设登记表.md               假设记录块（agent 可机械读写）+ 死因码表 + 出口清单
   data/
     universe.parquet           8992 条证券档案（含 1192 只已退市）
     daily/{symbol}.parquet     5223 个分片，1102 万行，后复权日线
