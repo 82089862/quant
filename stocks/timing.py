@@ -16,10 +16,13 @@
   - 只做多、满仓/空仓，不做空 —— 指数做空的成本与可得性没有数据，不假设。
   - 研究阶段 lot_size=1，否则指数点位会把资金 floor 成 0 股（README 回测陷阱 3）。
 
+汇总表固定写 `stocks/out/timing_pool_summary.csv`（入库的事实源，见 import_screen.py）。
+
 用法:
     uv run stocks/timing.py --symbol sh000300
     uv run stocks/timing.py --symbol sh000300 --strategies rsrs,icu,llt
-    uv run stocks/timing.py --symbol sh000300 --out stocks/out/timing_sh000300.csv
+    uv run stocks/timing.py --symbols sh000300,sh000905,sh000016,sh000001,sz399006         --out stocks/out/timing_pool.csv                 # 净值曲线，汇总表另存 _summary.csv
+    uv run stocks/import_screen.py load                   # 汇总表镜像进 MySQL
 """
 from __future__ import annotations
 
@@ -263,8 +266,11 @@ def main() -> None:
     if len(passed):
         print(passed.to_string(float_format=lambda v: f"{v:.4f}"))
 
+    summary_path = pathlib.Path(args.out).with_name(pathlib.Path(args.out).stem + "_summary.csv")         if args.out else OUT_DIR / "timing_pool_summary.csv"
+    OUT_DIR.mkdir(exist_ok=True)
+    out.reset_index().to_csv(summary_path, index=False)   # 入库的事实源（import_screen.py 读它）
+    log(f"汇总表 -> {summary_path}")
     if args.out:
-        OUT_DIR.mkdir(exist_ok=True)
         pd.DataFrame(all_curves).to_csv(args.out)
         log(f"净值曲线 -> {args.out}")
     log("结束")
