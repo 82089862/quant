@@ -70,6 +70,7 @@ quant/
 | `stocks/check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
 | `stocks/test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |
 | `stocks/import_mysql.py` | 把 `stocks/data/` 的 parquet 导入本机 MySQL（`ddl` / `probe` / `load` / `verify`） |
+| `stocks/import_hypothesis.py` | 把 `doc/` 的假设登记表 + 死因码表镜像进 MySQL（`ddl` / `load` / `verify`），单向、重跑覆盖 |
 | `stocks/capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
 | `stocks/margin_probe.py` | 新数据源信息含量实测。融资融券 PR 净增 +1.95 |
 | `stocks/margin_factor.py` | 两融因子验证：IC + surrogate + 训练/测试 + 7 档正交性阶梯 |
@@ -166,12 +167,22 @@ IC 均值：动量 -0.0704 / 反转 +0.0704，ICIR 0.46。**A 股月频存在显
 回测链路不读 MySQL，这是给外部工具 / BI 用的一份镜像。
 
 - 实例：本机 WSL Ubuntu-22.04 里的 MySQL 8.0.46，Windows 侧 `127.0.0.1:3306` 可直连。
-- 库 `quant`，两张表：
+- 库 `quant`，四张表 + 一个视图：
 
 | 表 | 行数 | 结构 |
 |---|---|---|
 | `daily` | 11,022,483 | `panel_*.parquet` 的镜像。`PRIMARY KEY(symbol, date)` + `KEY(date)`，9 个数值列全 `DOUBLE`（与 parquet 同精度），`date` 是 `DATE` |
 | `universe` | 8,992 | `universe.parquet` 的镜像。`PRIMARY KEY(code)`，`code_name` 是 utf8mb4 中文名 |
+| `hypothesis` | 9 | `doc/stocks/假设登记表.md` 的镜像。`PRIMARY KEY(id)`，字段与登记表记录块一一对应；`death_codes` 是逗号串（多码如 `F4,F3`，`FIND_IN_SET` 可直接用） |
+| `cause_code` | 6 | `doc/死因码表.md` 的镜像。`PRIMARY KEY(code)`，`status` = 在用 / 已废弃 |
+| `v_cause_stat`（视图） | — | `cause_code` LEFT JOIN `hypothesis`，直接出死因分布 + 命中哪些假设号 |
+
+- **`hypothesis` / `cause_code` 是单向只读镜像**：事实源永远是 `doc/` 那两个 md，导入工具 `stocks/import_hypothesis.py`（口令同样走 `QUANT_MYSQL_PASSWORD`）。`load` 先 `TRUNCATE` 再整表覆盖，**在库里手改的数据下次 load 会被冲掉**。
+
+```sql
+-- 死因分布（F3 占 5/8 = 62.5%）
+SELECT * FROM quant.v_cause_stat ORDER BY n_failed DESC;
+```
 
 - **`daily` 按年分区**（`PARTITION BY RANGE COLUMNS(date)`，p2015..p2026，12 个）。按日期查已实测裁剪到单个分区；归档旧年份用 `DROP PARTITION` 而不是 DELETE 千万行。
 - 导入走 DuckDB 的 `mysql` 扩展直连（`ATTACH ... (TYPE mysql)` + `INSERT INTO ... SELECT`），**没有中间文件**；实测约 3.2 万行/s，全量 4.5 分钟。按年分批、一年一个 INSERT（单语句即单事务），重跑会跳过已有年份。
@@ -190,7 +201,7 @@ ALTER TABLE quant.daily ADD PARTITION (PARTITION p2027 VALUES LESS THAN ('2028-0
 - ① 数据层 — 完成。5223 只 / 1102 万行 / 2015-01-05 起，4 项断言通过。
 - ② 撮合引擎 — 完成。5 项断言通过（对账 / 涨跌停 / 调仓 / 费用）。
 - ③ 因子研究 — 完成。动量与反转、分层回测、IC。
-- ④ MySQL 旁路副本 — 完成。`quant.daily` 1102 万行 / `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致。
+- ④ MySQL 旁路副本 — 完成。`quant.daily` 1102 万行 / `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致；`quant.hypothesis` 9 行 / `quant.cause_code` 6 行 + 视图 `v_cause_stat`，与 md 逐值一致。
 - ⑤ 组合与实盘 — 未做。下一步按性价比排序：基准对比（全市场等权 / 沪深300）> 分年稳定性 > 市值中性化 > 冲击成本估算。实盘通道（QMT/Ptrade）更远。
 - 旁支 A 时序 lead-lag — 已完成并**证伪**，见上节（训练集 7 个 Bonferroni 显著，测试集 0 个）。
 - 旁支 B 邻居效应 — 已探并放弃，脚本已删。方法：月末用过去 60 日收益率算残差相关，每只股票取 top-20 邻居；A 与邻居的同步 IC +0.39 是共同暴露、不可交易；A 相对邻居的超额反转 IC -5.5%、IR -0.58（137 期），比绝对反转因子（IR -0.46）更稳，但未继续验证。
