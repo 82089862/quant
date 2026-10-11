@@ -125,11 +125,17 @@ def portfolio_value(cash: float, shares: np.ndarray, prices: np.ndarray) -> floa
 def run_portfolio(panel: pd.DataFrame, rebalance: pd.DataFrame, cash0: float = 1_000_000.0,
                   commission: float = 0.00025, commission_min: float = 5.0,
                   stamp_tax_sell: float = 0.0005, transfer_fee: float = 0.00001,
-                  lot_size: int = 100) -> tuple[pd.DataFrame, pd.DataFrame]:
+                  lot_size: int = 100,
+                  delist_dates: dict[str, pd.Timestamp] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """多标的组合。panel 是长表(date/symbol/open/close)。
 
     rebalance: index = **执行日**（开盘成交那天），columns = symbol，值 = 目标权重。
     NaN/缺失列 = 权重 0（清仓）；整行全 NaN = 该日不调仓。调用方负责把信号日 shift 到执行日。
+
+    delist_dates: {symbol: 退市日}。**必须传，否则幸存者偏差换皮**：退市股行情到退市日就断，
+    下面的 `closes.ffill()` 会让它永远停在最后一个价格、永远卖不掉——那等于认为退市后还值那个价。
+    传了则退市日之后 open/close 置 0：持仓价值归零（损失全额体现），并以 0 价强平（不拦跌停），
+    因为退市是规则外事件，不受涨跌停约束。代价：每次强平收 5 元最低佣金（相对本金可忽略）。
 
     成交规则与 run_single 一致：涨跌停/停牌不成交，同日先卖后买。
     equity 的 blocked 列是当日没成交的笔数——这个数大了，回测和实盘就会分家。
@@ -138,6 +144,12 @@ def run_portfolio(panel: pd.DataFrame, rebalance: pd.DataFrame, cash0: float = 1
     opens = d.pivot(index="date", columns="symbol", values="open").sort_index()
     closes = d.pivot(index="date", columns="symbol", values="close").sort_index()
     closes_ff = closes.ffill()
+    if delist_dates:
+        for sym, dt in delist_dates.items():
+            if sym in closes_ff.columns:
+                after = closes_ff.index > dt
+                closes_ff.loc[after, sym] = 0.0
+                opens.loc[after, sym] = 0.0
     dates = closes.index
     symbols = list(closes.columns)
     sched = rebalance.reindex(columns=symbols).reindex(dates)
@@ -163,10 +175,11 @@ def run_portfolio(panel: pd.DataFrame, rebalance: pd.DataFrame, cash0: float = 1
                 delta = want - shares
 
                 for j in np.where(delta < 0)[0]:  # 先卖
-                    if not math.isfinite(px[j]) or pre[j] <= 0:
+                    if not math.isfinite(px[j]):
                         blocked += 1
                         continue
-                    if px[j] / pre[j] - 1 <= -(limits[j] - LIMIT_TOL):
+                    # px=0 是退市归零，允许成交（卖价 0）且不受涨跌停约束
+                    if px[j] > 0 and (pre[j] <= 0 or px[j] / pre[j] - 1 <= -(limits[j] - LIMIT_TOL)):
                         blocked += 1
                         continue
                     n = -delta[j]
@@ -177,10 +190,10 @@ def run_portfolio(panel: pd.DataFrame, rebalance: pd.DataFrame, cash0: float = 1
                     trade_rows.append((dates[i], symbols[j], "sell", n, px[j], fee))
 
                 for j in np.where(delta > 0)[0]:  # 后买
-                    if not math.isfinite(px[j]) or pre[j] <= 0:
+                    if not math.isfinite(px[j]) or px[j] <= 0:
                         blocked += 1
                         continue
-                    if px[j] / pre[j] - 1 >= limits[j] - LIMIT_TOL:
+                    if pre[j] <= 0 or px[j] / pre[j] - 1 >= limits[j] - LIMIT_TOL:
                         blocked += 1
                         continue
                     n = delta[j]

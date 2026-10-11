@@ -9,7 +9,7 @@ import math
 import pandas as pd
 
 import store
-from backtest import hold_all, run_single
+from backtest import hold_all, run_portfolio, run_single
 
 NO_COST = dict(commission=0.0, commission_min=0.0, stamp_tax_sell=0.0, transfer_fee=0.0)
 
@@ -100,12 +100,46 @@ def test_cost_math() -> None:
     print(f"[test] ⑤ 费用对账: 999 股，买费 {buy_fee:.4f} 卖费 {sell_fee:.4f}，期末现金 {expect_cash:.4f}")
 
 
+def test_delisting_zeroes_position() -> None:
+    """退市股在退市日之后归零，且能强平（不受跌停拦），blocked 不虚增。
+
+    这条断言存在的理由：不传 delist_dates 时 closes.ffill() 会让退市股永远停在
+    最后一个价格、永远卖不掉——那是另一种幸存者偏差，而且不报错。
+    """
+    dates = pd.bdate_range("2024-01-01", periods=5)
+    alive = pd.DataFrame({"date": dates, "symbol": "sh600000", "open": 10.0, "close": 10.0})
+    # B 只有前 3 天有行情，第 3 天（dates[2]）后退市
+    dead = pd.DataFrame({"date": dates[:3], "symbol": "sh600001",
+                         "open": [10.0, 9.0, 8.0], "close": [10.0, 9.0, 8.0]})
+    panel = pd.concat([alive, dead], ignore_index=True)
+    sched = pd.DataFrame({"sh600000": 0.5, "sh600001": 0.5}, index=dates[[1, 2, 4]])
+
+    eq_zero, tr_zero = run_portfolio(panel, sched, cash0=1000.0, lot_size=1,
+                                     delist_dates={"sh600001": dates[2]}, **NO_COST)
+    eq_ff, tr_ff = run_portfolio(panel, sched, cash0=1000.0, lot_size=1, **NO_COST)
+
+    assert eq_zero["equity"].iloc[-1] < eq_ff["equity"].iloc[-1], \
+        f"退市归零应低于 ffill 估值: {eq_zero['equity'].iloc[-1]} vs {eq_ff['equity'].iloc[-1]}"
+    assert abs(eq_zero["equity"].iloc[-1] - 505.0) < 1e-9, \
+        f"手算应为 505（现金5 + 卖A 250 + A 25股×10），实际 {eq_zero['equity'].iloc[-1]}"
+    sold = tr_zero[(tr_zero["symbol"] == "sh600001") & (tr_zero["side"] == "sell")]
+    assert len(sold) == 1 and sold["price"].iloc[0] == 0.0, "退市股应以 0 价被强平一次"
+    # 不处理时 open 是 NaN（面板里已无该股），买入被 isfinite 拦下并计入 blocked；
+    # 归零版把 open 置 0，强平不被拦，所以当日 blocked 必须是 0。
+    assert eq_zero["blocked"].iloc[-1] == 0, "0 价强平当日不该计入 blocked"
+    assert eq_ff["blocked"].sum() > eq_zero["blocked"].sum(), \
+        "不处理那版应因 NaN 开盘价多吃一次 blocked（退市股没法买回来）"
+    print(f"[test] ⑥ 退市归零: 净值 {eq_zero['equity'].iloc[-1]:.2f} vs 不处理 {eq_ff['equity'].iloc[-1]:.2f}，"
+          f"0 价强平 1 笔，blocked 未虚增")
+
+
 def main() -> None:
     test_buy_and_hold_math()
     test_limit_up_blocks_buy()
     test_limit_down_blocks_sell()
     test_target_weight_and_t1_order()
     test_cost_math()
+    test_delisting_zeroes_position()
     print("[test] 全部通过")
 
 

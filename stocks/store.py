@@ -24,6 +24,17 @@ def load_universe() -> pd.DataFrame:
     return df
 
 
+def delist_dates(symbols) -> dict[str, pd.Timestamp]:
+    """退市日表 {symbol: outDate}，喂给 backtest.run_portfolio 做退市归零。
+
+    不传这张表就是另一种幸存者偏差：退市股行情到退市日就断，面板里的 ffill
+    会让它永远停在最后一个价格、永远卖不掉，等于认为退市后还值那个价。
+    """
+    u = load_universe()
+    u = u[u["outDate"].notna() & u["symbol"].isin(set(symbols))]
+    return dict(zip(u["symbol"], u["outDate"]))
+
+
 def load_daily(symbol: str, start: str | None = None, end: str | None = None,
                daily_dir: pathlib.Path = DAILY_DIR) -> pd.DataFrame:
     """一只股票的后复权日线，按日期升序。缺文件返回空表。"""

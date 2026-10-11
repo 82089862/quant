@@ -21,6 +21,9 @@ DAILY_DIR = DATA_DIR / "daily"
 BASELINE = "sh600519"
 CHECK_RANGE = ("2015-01-01", "2026-10-09")
 UP_DOWN_LIMIT = 0.1001  # 主板涨跌停 10% + 浮点容差
+# 退市股抽检样本：拉取走新浪直连（fetch.fetch_one_delisted），与在市股的 akshare 路径分开
+DELISTED_SAMPLE = ("sh600068", "sh600070")
+# 注：断言③的 ±10.01% 不适用于退市股 —— 退市整理期首日无涨跌幅限制，实测到 10.10%
 
 
 def pull(symbol: str, adjust: str, start: str = CHECK_RANGE[0], end: str = CHECK_RANGE[1]) -> pd.DataFrame:
@@ -67,12 +70,49 @@ def check_price_band() -> None:
     print(f"[check] ③ 收益区间: {len(r)} 个交易日全部在 ±{UP_DOWN_LIMIT:.2%} 内（min {r.min():.4f} / max {r.max():.4f}）")
 
 
+def check_dual_path() -> None:
+    """退市股与在市股两条拉取路径必须逐点一致，否则混在一起的面板不可比。
+
+    在市股走 akshare，退市股走新浪直连（akshare 对退市股会崩在 amount 接口）。
+    这里用同一只在市股跑两条路径对账 —— 只要它相等，退市股的口径就可信。
+    """
+    from fetch import fetch_one_delisted
+
+    for sym in (BASELINE, "sz000001"):
+        new = fetch_one_delisted(sym, *CHECK_RANGE)
+        old = pull(sym, "hfq", *CHECK_RANGE)
+        new["date"], old["date"] = pd.to_datetime(new["date"]), pd.to_datetime(old["date"])
+        m = new.merge(old, on="date", suffixes=("_new", "_old"))
+        assert len(m) > 500, f"{sym} 重叠区间太短: {len(m)}"
+        for c in ("open", "high", "low", "close", "volume", "amount"):
+            d = float((m[f"{c}_new"] - m[f"{c}_old"]).abs().max())
+            assert d == 0.0, f"{sym} 的 {c} 两条路径不一致，最大差 {d}"
+    print(f"[check] ⑤ 双路径口径: {BASELINE} / sz000001 全列逐点相同（直连 vs akshare）")
+
+
+def check_delisted_shards() -> None:
+    """退市股分片：行情到退市日就断（不能延伸到面板末尾），股本已补齐。"""
+    for sym in DELISTED_SAMPLE:
+        p = DAILY_DIR / f"{sym}.parquet"
+        if not p.exists():
+            print(f"[check] ⑥ {sym} 分片不存在（源无数据，跳过）")
+            continue
+        df = pd.read_parquet(p)
+        last = df["date"].max()
+        assert last < pd.Timestamp("2026-09-01"), f"{sym} 行情延伸到了 {last}，退市股不该有近期数据"
+        assert df["outstanding_share"].notna().any(), \
+            f"{sym} 的 outstanding_share 全空，跑 fetch.py --backfill-share 补"
+    print(f"[check] ⑥ 退市股分片: {len(DELISTED_SAMPLE)} 只，行情截止正常、股本已补")
+
+
 def check_shards(full: bool) -> None:
     """本地分片结构完整：日期升序无重复、关键列无 NaN、收盘价为正。"""
     paths = sorted(DAILY_DIR.glob("*.parquet"))
     assert paths, f"{DAILY_DIR} 下没有分片，先跑 fetch.py"
     if not full:
-        paths = paths[:20]
+        # 抽检也把退市股带上：它们是另一条拉取路径，最容易漏检
+        extra = [p for p in paths if p.stem in DELISTED_SAMPLE]
+        paths = paths[:20] + [p for p in extra if p not in paths[:20]]
     for p in paths:
         df = pd.read_parquet(p)
         assert len(df) > 0, f"{p.name} 空表"
@@ -92,6 +132,8 @@ def main() -> None:
     check_factor_consistency()
     check_price_band()
     check_shards(args.full)
+    check_dual_path()
+    check_delisted_shards()
     print("[check] 全部通过")
 
 

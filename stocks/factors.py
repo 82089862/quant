@@ -110,11 +110,16 @@ def curve_stats(equity: pd.DataFrame, trades: pd.DataFrame, cash0: float) -> dic
 def run_layers(fac: pd.DataFrame, panel: pd.DataFrame, dates: pd.DatetimeIndex,
                n_groups: int, cash0: float = CASH0,
                lot_size: int = 1) -> tuple[dict[str, pd.Series], list[dict]]:
-    """按 fac 分 n_groups 层，逐层跑组合回测。返回 ({组名: 净值}, [逐层绩效])。"""
+    """按 fac 分 n_groups 层，逐层跑组合回测。返回 ({组名: 净值}, [逐层绩效])。
+
+    退市股在退市日之后归零（store.delist_dates 交给引擎），否则它们会永远停在最后价格。
+    """
     curves: dict[str, pd.Series] = {}
     stats: list[dict] = []
+    delist = store.delist_dates(panel["symbol"].unique())
     for g, sched in build_schedule(fac, n_groups, dates).items():
-        eq, tr = backtest.run_portfolio(panel, sched, cash0=cash0, lot_size=lot_size)
+        eq, tr = backtest.run_portfolio(panel, sched, cash0=cash0, lot_size=lot_size,
+                                        delist_dates=delist)
         curves[f"G{g + 1}"] = eq.set_index("date")["equity"]
         stats.append({"组": f"G{g + 1}", **curve_stats(eq, tr, cash0)})
     return curves, stats
