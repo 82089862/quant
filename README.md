@@ -1,30 +1,32 @@
 # quant
 
-A 股日频回测最小系统。命令行工具，无 GUI、无回测框架依赖。
+A 股日频回测最小系统 + 电力交易研究骨架。命令行工具，无 GUI、无回测框架依赖。
+
+**按域分目录**：`stocks/`（股票）、`power/`（电力交易）。两域共用 `doc/研究方法与验证协议.md`（怎么判）与 `doc/死因码表.md`（为什么失败）。
 
 ## 快速开始
 
 ```bash
 uv sync
-uv run universe.py                                            # 证券档案（一次，约 30s）
-uv run fetch.py --start 2015-01-01                            # 全A行情（一次，约 70 分钟）
-uv run check.py                                               # 数据层自检（4 项断言）
-uv run test_backtest.py                                       # 引擎自检（5 项断言）
-uv run backtest.py                                            # 示例：茅台买入持有
-uv run factors.py --factor reversal --window 20 --groups 5    # 分层回测 + IC
+uv run stocks/universe.py                                            # 证券档案（一次，约 30s）
+uv run stocks/fetch.py --start 2015-01-01                            # 全A行情（一次，约 70 分钟）
+uv run stocks/check.py                                               # 数据层自检（4 项断言）
+uv run stocks/test_backtest.py                                       # 引擎自检（5 项断言）
+uv run stocks/backtest.py                                            # 示例：茅台买入持有
+uv run stocks/factors.py --factor reversal --window 20 --groups 5    # 分层回测 + IC
 ```
 
-`factors.py` 首次运行会自动合成面板（DuckDB，约 6 秒）。
+`stocks/factors.py` 首次运行会自动合成面板（DuckDB，约 6 秒）。
 
-中断后重跑 `fetch.py` 即可，已拉的分片会跳过；`fetch.py --retry` 只重试 `data/failed.txt` 里的。
+中断后重跑 `stocks/fetch.py` 即可，已拉的分片会跳过；`stocks/fetch.py --retry` 只重试 `stocks/data/failed.txt` 里的。
 
 导一份到本机 MySQL（可选旁路副本，见「MySQL 旁路副本」）：
 
 ```bash
-uv run import_mysql.py ddl      # 建库 quant + 表 daily / universe
-uv run import_mysql.py probe    # 先测写路径（1 万行，自动清理）
-uv run import_mysql.py load     # 全量导入（约 5 分钟）
-uv run import_mysql.py verify   # 行数 + 分区 + 抽样比对 parquet
+uv run stocks/import_mysql.py ddl      # 建库 quant + 表 daily / universe
+uv run stocks/import_mysql.py probe    # 先测写路径（1 万行，自动清理）
+uv run stocks/import_mysql.py load     # 全量导入（约 5 分钟）
+uv run stocks/import_mysql.py verify   # 行数 + 分区 + 抽样比对 parquet
 ```
 
 密码走 `QUANT_MYSQL_PASSWORD` 环境变量或 `--password`，不写进任何文件。
@@ -33,39 +35,50 @@ uv run import_mysql.py verify   # 行数 + 分区 + 抽样比对 parquet
 
 ```
 quant/
-  universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
-  doc/
-    研究方法与验证协议.md       证伪型测试的共同逻辑（四个环节 + 已实测失败案例总表）
-    假设登记表.md               假设记录块（agent 可机械读写）+ 死因码表 + 出口清单
-  data/
-    universe.parquet           8992 条证券档案（含 1192 只已退市）
-    daily/{symbol}.parquet     5223 个分片，1102 万行，后复权日线
-    panel_2015_2026.parquet    合成面板 303MB，横截面查询走它
-    failed.txt                 拉取失败清单
-  out/                         净值曲线与 IC 的 CSV
+  doc/                               全域通用
+    研究方法与验证协议.md             证伪型测试的共同逻辑（五环节 + 已实测失败案例总表）
+    死因码表.md                       F1~F5 死因码，两域共用、跨域查重
+    stocks/假设登记表.md              股票域假设记录块（ID 用 H）
+    power/假设登记表.md               电力域假设记录块（ID 用 P）
+  stocks/                            股票域
+    universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
+    capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
+    downturn.py  import_mysql.py
+    data/
+      universe.parquet               8992 条证券档案（含 1192 只已退市）
+      daily/{symbol}.parquet         5223 个分片，1102 万行，后复权日线
+      panel_2015_2026.parquet        合成面板 303MB，横截面查询走它
+      failed.txt                     拉取失败清单
+    out/                             净值曲线与 IC 的 CSV
+  power/                             电力交易域（骨架，见 power/README.md）
+    data/
+    out/
 ```
 
-`data/` 合计 853MB，不进 git。
+`stocks/data/` 合计 853MB，不进 git。
 
-## 文件
+## 文件（stocks/）
 
 | 文件 | 职责 |
 |---|---|
-| `universe.py` | 拉 baostock 全量证券档案 -> `data/universe.parquet` |
-| `fetch.py` | 拉新浪后复权日线 -> `data/daily/{symbol}.parquet`，原子写、断点续传 |
-| `store.py` | 读数据的唯一入口。`load_daily` 单只 / `load_panel` 横截面 / `build_panel` 合成面板 |
-| `backtest.py` | 日频撮合引擎。`run_single` 单标的 / `run_portfolio` 多标的组合 |
-| `factors.py` | 单因子（动量/反转）+ 月度分层回测 + IC |
-| `leadlag.py` | 时序滞后联动挖掘：锚点遍历全市场 + 多重检验校正 + surrogate 噪声底 + 样本内外分割 |
-| `check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
-| `test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |
-| `import_mysql.py` | 把 `data/` 的 parquet 导入本机 MySQL（`ddl` / `probe` / `load` / `verify`） |
-| `capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
-| `margin_probe.py` | 新数据源信息含量实测。融资融券 PR 净增 +1.95 |
-| `margin_factor.py` | 两融因子验证：IC + surrogate + 训练/测试 + 7 档正交性阶梯 |
-| `dominance.py` | 控制变量子集穷举（2^11）+ 优势分析：排除"过控制"、量化共线分摊 |
-| `downturn.py` | 尾部传染挖掘：锚点下跌日 -> 候选次日下跌 lift + 多重检验校正 + 样本外 |
-| `doc/研究方法与验证协议.md` | 上述证伪型测试的共同方法论 |
+| `stocks/universe.py` | 拉 baostock 全量证券档案 -> `stocks/data/universe.parquet` |
+| `stocks/fetch.py` | 拉新浪后复权日线 -> `stocks/data/daily/{symbol}.parquet`，原子写、断点续传 |
+| `stocks/store.py` | 读数据的唯一入口。`load_daily` 单只 / `load_panel` 横截面 / `build_panel` 合成面板 |
+| `stocks/backtest.py` | 日频撮合引擎。`run_single` 单标的 / `run_portfolio` 多标的组合 |
+| `stocks/factors.py` | 单因子（动量/反转）+ 月度分层回测 + IC |
+| `stocks/leadlag.py` | 时序滞后联动挖掘：锚点遍历全市场 + 多重检验校正 + surrogate 噪声底 + 样本内外分割 |
+| `stocks/check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
+| `stocks/test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |
+| `stocks/import_mysql.py` | 把 `stocks/data/` 的 parquet 导入本机 MySQL（`ddl` / `probe` / `load` / `verify`） |
+| `stocks/capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
+| `stocks/margin_probe.py` | 新数据源信息含量实测。融资融券 PR 净增 +1.95 |
+| `stocks/margin_factor.py` | 两融因子验证：IC + surrogate + 训练/测试 + 7 档正交性阶梯 |
+| `stocks/dominance.py` | 控制变量子集穷举（2^11）+ 优势分析：排除"过控制"、量化共线分摊 |
+| `stocks/downturn.py` | 尾部传染挖掘：锚点下跌日 -> 候选次日下跌 lift + 多重检验校正 + 样本外 |
+| `doc/研究方法与验证协议.md` | 上述证伪型测试的**共同方法论**（跨域通用） |
+| `doc/死因码表.md` | F1~F5 死因码，**两域共用**，失败后跨域查重 |
+| `doc/stocks/假设登记表.md` | 股票域假设记录块（ID 用 `H`） |
+| `doc/power/假设登记表.md` | 电力域假设记录块（ID 用 `P`） |
 
 ## 数据口径
 
@@ -96,7 +109,7 @@ quant/
 - 停牌日在日线里直接缺失，持仓按上一收盘估值，不交易。
 - 退市股（255 只）未拉，回测存在幸存者偏差。档案已留，后续可补。
 - 北交所不在数据源覆盖内。
-- `sh689009`（科创板 CDR）新浪无数据，留在 `data/failed.txt`。
+- `sh689009`（科创板 CDR）新浪无数据，留在 `stocks/data/failed.txt`。
 
 ## 回测陷阱（实测踩过的，都静默失败）
 
@@ -108,7 +121,7 @@ quant/
 
 ## 因子结果（2015-01 ~ 2026-10，月度调仓，5 层等权，1 亿本金）
 
-`uv run factors.py --factor momentum --window 20 --groups 5`（reversal 结果与之对称）：
+`uv run stocks/factors.py --factor momentum --window 20 --groups 5`（reversal 结果与之对称）：
 20 日动量 / 反转，140 期：
 
 | 组 | 动量累计 | 反转累计 |
@@ -125,7 +138,7 @@ IC 均值：动量 -0.0704 / 反转 +0.0704，ICIR 0.46。**A 股月频存在显
 
 ## 时序滞后联动（lead-lag）实测
 
-`uv run leadlag.py --anchor sz300359` —— 锚点全通教育，候选 5223 只，滞后 1~5 日，共 26,115 次检验：
+`uv run stocks/leadlag.py --anchor sz300359` —— 锚点全通教育，候选 5223 只，滞后 1~5 日，共 26,115 次检验：
 
 | 切片 | 名义显著(5%) | Bonferroni | FDR |
 |---|---|---|---|
@@ -146,7 +159,7 @@ IC 均值：动量 -0.0704 / 反转 +0.0704，ICIR 0.46。**A 股月频存在显
 6. 样本内外分割，只报留存率
 7. 涨跌停过滤（实测剔除 1.52% 样本）——涨停买不到、信息延到次日，会伪装成 lead-lag，那是交易制度产物
 
-输出 `out/leadlag_{anchor}.csv`：配对、滞后阶、训练/测试 ccf、p 值、是否同号、是否留存。只输出统计观测，不判定因果、不生成买卖信号。
+输出 `stocks/out/leadlag_{anchor}.csv`：配对、滞后阶、训练/测试 ccf、p 值、是否同号、是否留存。只输出统计观测，不判定因果、不生成买卖信号。
 
 ## MySQL 旁路副本（可选）
 
