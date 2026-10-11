@@ -758,13 +758,17 @@ def main() -> None:
             if len(ic_m):
                 # 对账：这一列必须和 factors.ic_series 在测试段的 IC 均值逐位相等，
                 # 不等就说明控制集接错了行、或秩算错了行集，直接停
-                gap = abs(float(np.mean(ic0)) - float(te["ic_mean"])) if ic0 else np.inf
-                if gap > 1e-12:
-                    raise ValueError(f"{name}: 正交化对账不过，行集/秩接错（差 {gap:.2e}）")
+                # ic0 里可能有 NaN 期（某些期因子或前向收益无方差）：用 nanmean，
+                # 且 gap 必须显式查 isfinite——nan > 1e-12 恒为 False，会让断言静默失效
+                # （ic_series 那边 dropna 过，所以两边口径一致）
+                ic_raw = float(np.nanmean(ic0)) if ic0 else np.nan
+                gap = abs(ic_raw - float(te["ic_mean"])) if ic0 else np.inf
+                if not np.isfinite(gap) or gap > 1e-12:
+                    raise ValueError(f"{name}: 正交化对账不过，行集/秩接错（差 {gap}）")
                 by_mask = np.nanmean(ic_m, axis=0)
                 r2_all = float(np.nanmean(r2_m[:, -1]))
-                tag, why, ic1 = orth_verdict(float(np.mean(ic0)), by_mask, r2_all)
-                extra = {"ic_nocontrol": float(np.mean(ic0)), "ic_single_min": ic1,
+                tag, why, ic1 = orth_verdict(ic_raw, by_mask, r2_all)
+                extra = {"ic_nocontrol": ic_raw, "ic_single_min": ic1,
                          "ic_allctrl": float(by_mask[-1]), "r2_allctrl": r2_all,
                          "orth_n": int(ic_m.shape[0]), "verdict": tag, "verdict_why": why}
         if lay and name in lay:
