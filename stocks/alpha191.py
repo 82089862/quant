@@ -631,9 +631,10 @@ def orth_scan(fac: pd.DataFrame, ctrl: dict, fwd: pd.DataFrame, dates: pd.Dateti
         if dt not in fac.index or dt not in fwd.index:
             continue
         y_all, f_all = fac.loc[dt], fwd.loc[dt]
-        own = pd.DataFrame({"y": y_all, "fwd": f_all}).dropna()
-        if len(own) >= 30:
-            ic0.append(factors.spearman(own["y"], own["fwd"]))
+        # 守卫条件必须与 factors.ic_series 逐字一致（只看前向收益非空数），
+        # 否则对账的两个集合不同，会差出一个 1e-5 量级的假差异
+        if f_all.notna().sum() > 5:
+            ic0.append(factors.spearman(y_all, f_all))
         block = pd.DataFrame({c: ctrl[c].loc[dt] for c in cols})
         block["y"] = y_all.reindex(block.index)
         block["fwd"] = f_all.reindex(block.index)
