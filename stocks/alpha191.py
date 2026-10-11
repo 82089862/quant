@@ -707,6 +707,8 @@ def main() -> None:
     ap.add_argument("--only", default="", help="只跑这些因子，逗号分隔，冒烟测试用")
     ap.add_argument("--limit-symbols", type=int, default=None, help="只取前 N 只，冒烟测试用")
     ap.add_argument("--no-orth", action="store_true", help="跳过正交化（冒烟用）")
+    ap.add_argument("--layers", default="", help="对这些因子跑分层回测，逗号分隔（如 alpha042,alpha107）")
+    ap.add_argument("--groups", type=int, default=5, help="分层组数")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
@@ -727,6 +729,10 @@ def main() -> None:
 
     ctrl, masks = build_orth_inputs(panel_path, me) if not args.no_orth else (None, None)
     orth_dates = me[(me > pd.Timestamp(args.split))]   # 只在测试段判读，避免训练段泄漏
+
+    lay = [x.strip() for x in args.layers.split(",") if x.strip()]
+    prices = factors.load_prices(panel_path) if lay else None
+    lay_rows: list[dict] = []
 
     names = args.only.split(",") if args.only else list(ALPHAS)
     rows: list[dict] = []
@@ -761,6 +767,16 @@ def main() -> None:
                 extra = {"ic_nocontrol": float(np.mean(ic0)), "ic_single_min": ic1,
                          "ic_allctrl": float(by_mask[-1]), "r2_allctrl": r2_all,
                          "orth_n": int(ic_m.shape[0]), "verdict": tag, "verdict_why": why}
+        if lay and name in lay:
+            # 分层回测要跑几分钟，失败不该连累上面已算好的 IC 结果，单独兜住
+            # 变量名避开循环里的 st（时间戳），否则会把它覆盖成 list
+            try:
+                lay_curves, lay_stats = factors.run_layers(fac, prices, dates, args.groups)
+                pd.DataFrame(lay_curves).to_csv(OUT_DIR / f"layers_{name}_{args.groups}g.csv")
+                for s in lay_stats:
+                    lay_rows.append({"factor": name, **s})
+            except Exception as exc:
+                log(f"{name} 分层回测失败: {type(exc).__name__}: {exc}")
         rows.append({"factor": name, "status": "已算", "reason": "",
                      **full, "p": p_value(full["t"]), "bonferroni": 0, "fdr": 0,
                      "ic_train": tr["ic_mean"], "ic_test": te["ic_mean"],
@@ -778,6 +794,14 @@ def main() -> None:
     OUT_DIR.mkdir(exist_ok=True)
     path = pathlib.Path(args.out) if args.out else OUT_DIR / "alpha191_ic.csv"
     out.to_csv(path, index=False)
+    if lay_rows:
+        p = OUT_DIR / "alpha191_layers_summary.csv"
+        pd.DataFrame(lay_rows).to_csv(p, index=False)
+        log(f"分层绩效（{len(lay_rows)} 行）-> {p}")
+        g5 = [r for r in lay_rows if r["组"] == "G5"]
+        if g5:
+            print(pd.DataFrame(g5)[["factor", "累计", "年化", "月胜率", "月胜率CI",
+                                    "年化夏普", "最大回撤", "年换手双边", "被挡"]].to_string(index=False))
     log(f"共 {len(out)} 行（已算 {len(calc)} / 跳过 {len(SKIP)} / 报错 "
         f"{len(out) - len(calc) - len(SKIP)}），耗时 {time.time() - t0:.0f}s -> {path}")
 
@@ -795,7 +819,7 @@ def main() -> None:
             log(f"过 Bonferroni + 训练测试同号 + 全控制后仍独立: {len(keep)} 个")
             for r in sorted(keep, key=lambda x: -abs(x["ic_allctrl"]))[:15]:
                 print(f"    {r['factor']:<10s} 无控制 {r['ic_nocontrol']:+.4f} -> 全控制 "
-                      f"{r['ic_allctrl']:+.4f}  R² {r['r2_allctrl']:.3f}  t {r['t']:+.2f}")
+                      f"{r['ic_allctrl']:+.4f}  R2 {r['r2_allctrl']:.3f}  t {r['t']:+.2f}")
 
 
 if __name__ == "__main__":
