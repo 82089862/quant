@@ -72,7 +72,7 @@ quant/
 | `stocks/alpha191.py` | GTJA Alpha191 因子库（自写实现）：147 个公式 + 自写向量化算子，月度 IC + 训练/测试 + 11 控制变量正交化 + Bonferroni/FDR |
 | `stocks/index_fetch.py` | 拉宽基指数日线（新浪）-> `stocks/data/index/`。股票 panel 里没有指数，择时类策略要先跑它 |
 | `stocks/timing.py` | 指数择时策略池：RSRS / QRS修正 / ICU均线 / LLT / 鳄鱼线 / 滚动夏普，含训练测试切分与循环平移 surrogate |
-| `stocks/import_screen.py` | 把择时策略池筛选结果镜像进 MySQL（`ddl` / `load` / `verify`），单向、重跑覆盖 |
+| `stocks/import_screen.py` | 把择时/因子筛选结果镜像进 MySQL（`ddl` / `load` / `verify`，`--table timing\|factor\|all`），单向、重跑覆盖 |
 | `stocks/import_mysql.py` | 把 `stocks/data/` 的 parquet 导入本机 MySQL（`ddl` / `probe` / `load` / `verify`） |
 | `stocks/import_hypothesis.py` | 把 `doc/` 的假设登记表 + 死因码表镜像进 MySQL（`ddl` / `load` / `verify`），单向、重跑覆盖 |
 | `stocks/capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
@@ -270,7 +270,7 @@ uv run stocks/timing.py --symbols sh000300,sh000905,sh000016,sh000001,sz399006 -
 回测链路不读 MySQL，这是给外部工具 / BI 用的一份镜像。
 
 - 实例：本机 WSL Ubuntu-22.04 里的 MySQL 8.0.46，Windows 侧 `127.0.0.1:3306` 可直连。
-- 库 `quant`，五张表 + 一个视图：
+- 库 `quant`，六张表 + 一个视图：
 
 | 表 | 行数 | 结构 |
 |---|---|---|
@@ -279,14 +279,20 @@ uv run stocks/timing.py --symbols sh000300,sh000905,sh000016,sh000001,sz399006 -
 | `hypothesis` | 9 | `doc/stocks/假设登记表.md` 的镜像。`PRIMARY KEY(id)`，字段与登记表记录块一一对应；`death_codes` 是逗号串（多码如 `F4,F3`，`FIND_IN_SET` 可直接用） |
 | `cause_code` | 6 | `doc/死因码表.md` 的镜像。`PRIMARY KEY(code)`，`status` = 在用 / 已废弃 |
 | `timing_screen` | 40 | 择时策略池的筛选结论，一行 = 一个「指数 × 策略」。源是 `stocks/out/timing_pool_summary.csv`。`passed` 在导入时按 1-0.05/检验次数 现算 |
+| `factor_screen` | 191 | Alpha191 因子库的筛选结论，一行 = 一个因子（已算 147 / 跳过 44）。源是 `stocks/out/alpha191_ic.csv`。含正交化对账列 `ic_nocontrol`（必须逐位等于 `ic_test`）与 `verdict` 判读 |
 | `v_cause_stat`（视图） | — | `cause_code` LEFT JOIN `hypothesis`，直接出死因分布 + 命中哪些假设号 |
 
 - **`hypothesis` / `cause_code` 是单向只读镜像**：事实源永远是 `doc/` 那两个 md，导入工具 `stocks/import_hypothesis.py`（口令同样走 `QUANT_MYSQL_PASSWORD`）。`load` 先 `TRUNCATE` 再整表覆盖，**在库里手改的数据下次 load 会被冲掉**。
-- `timing_screen` 同理是单向镜像，源是 `stocks/out/timing_pool_summary.csv`，导入工具 `stocks/import_screen.py`。
+- `timing_screen` 同理是单向镜像，源是 `stocks/out/timing_pool_summary.csv`；`factor_screen` 源是 `stocks/out/alpha191_ic.csv`。两者的导入工具都是 `stocks/import_screen.py`（`--table timing|factor|all`）。
 
 ```sql
 -- 死因分布（F3 占 5/8 = 62.5%）
 SELECT * FROM quant.v_cause_stat ORDER BY n_failed DESC;
+
+-- Alpha191：过 Bonferroni + 训练测试同号 + 全控制后仍独立的 13 个候选
+SELECT factor, ic_allctrl, r2_allctrl, t FROM quant.factor_screen
+WHERE status='已算' AND bonferroni=1 AND sign_same=1 AND verdict='部分独立'
+ORDER BY abs(ic_allctrl) DESC;
 
 -- 择时池：测试分位最高的几个（passed 全为 0，一个都没过 Bonferroni 门槛）
 SELECT symbol, strategy, test_cum, test_sharpe, test_pct, passed
@@ -311,7 +317,7 @@ ALTER TABLE quant.daily ADD PARTITION (PARTITION p2027 VALUES LESS THAN ('2028-0
 - ① 数据层 — 完成。5223 只 / 1102 万行 / 2015-01-05 起，4 项断言通过。
 - ② 撮合引擎 — 完成。5 项断言通过（对账 / 涨跌停 / 调仓 / 费用）。
 - ③ 因子研究 — 完成。动量与反转、分层回测、IC。
-- ④ MySQL 旁路副本 — 完成。`quant.daily` 1102 万行 / `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致；`quant.hypothesis` 9 行 / `quant.cause_code` 6 行 + 视图 `v_cause_stat`，`quant.timing_screen` 40 行，都与事实源逐值一致。
+- ④ MySQL 旁路副本 — 完成。`quant.daily` 1102 万行 / `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致；`quant.hypothesis` 9 行 / `quant.cause_code` 6 行 + 视图 `v_cause_stat`，`quant.timing_screen` 40 行 / `quant.factor_screen` 191 行（已算 147），都与事实源逐值一致。
 - ⑥ 外部策略池 — 择时部分完成：5 指数 × 7 策略 = 35 次检验，Bonferroni 门槛下**通过 0 个**。
 - ⑦ Alpha191 因子库 — 147 个公式自写实现并跑完。裸 IC 过 Bonferroni 94 个，但正交化后判为「部分独立」的只有 **14 个**，其中同时过 Bonferroni 与训练测试同号的 **13 个候选**；剩余两关（控制集 2^11 穷举、surrogate 噪声底）未跑。
 - ⑤ 组合与实盘 — 未做。下一步按性价比排序：基准对比（全市场等权 / 沪深300）> 分年稳定性 > 市值中性化 > 冲击成本估算。实盘通道（QMT/Ptrade）更远。
