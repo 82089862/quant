@@ -226,17 +226,17 @@ def main() -> int:
     if args.cmd == "artifacts":
         problems = verify_artifacts(args.dir or None)
         for m in problems:
-            print(f"[freeze] ✗ {m}", file=sys.stderr)
+            print(f"[freeze] [X] {m}", file=sys.stderr)
         return 1 if problems else 0
 
     problems = verify(path)
     if problems:
         for m in problems:
-            print(f"[freeze] ✗ {m}", file=sys.stderr)
+            print(f"[freeze] [X] {m}", file=sys.stderr)
         print(f"[freeze] 快照与冻结锚点不符 —— 结论不能再当冻结口径用（协议 §9.1，"
               f"冻结于 {FREEZE_COMMIT[:7]} / {FREEZE_TS}）", file=sys.stderr)
         return 1
-    print(f"[freeze] ✓ {path.name} 与冻结锚点逐项一致（{FREEZE_COMMIT[:7]} / {FREEZE_TS}）")
+    print(f"[freeze] [OK] {path.name} 与冻结锚点逐项一致（{FREEZE_COMMIT[:7]} / {FREEZE_TS}）")
     print("[freeze] 注意：一致 != 独立验证，只是「与冻结快照同段」")
     return 0
 

@@ -11,7 +11,7 @@
   ⑧ 端到端：冻结快照上的原有判据结果与已存 out/layer_judge.csv 保持一致
   ⑨ 锚点事实源：`freeze_anchor.json` 与协议 §9.1 表格逐项一致（此前两处手工同步）
   ⑩ 冻结口径消费的 layers CSV：被改 / 缺文件 / 锚点外多出产物 → 能检出
-  ⑪ 端到端：产物被改时判据入口非零退出；factors.py / alpha191.py 日期闸（只比日期，不验内容）
+  (11) 端到端：产物被改时判据入口非零退出；factors.py / alpha191.py 日期闸（只比日期，不验内容）
 
 用法:
     uv run stocks/test_freeze_guard.py          # 全部（含 ~40s 的端到端复算）
@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -54,9 +55,12 @@ def write_panel(path: pathlib.Path, dates: list[str], close: float = 1.0,
 
 
 def run(script: str, *argv: str) -> subprocess.CompletedProcess:
+    # 子进程的输出编码必须和这里的 encoding="utf-8" 对齐：Windows 上默认是 GBK，
+    # 不钉住的话断言里比中文会全部落空（实测 4 个 layer_judge 用例假失败）
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run([sys.executable, str(ROOT / script), *argv],
-                          cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
-                          errors="replace")
+                          cwd=str(ROOT), env=env, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def copy_artifacts(dst: pathlib.Path) -> dict:

@@ -155,11 +155,11 @@ def main() -> None:
           f" / {merged['symbol'].nunique()} 只股票")
     print(f"价格特征 {len(base)} 维     PR = {pr_base:.2f}")
     print(f"加 5 个融资特征     PR = {pr_all:.2f}    净增 {pr_all - pr_base:+.2f}")
-    print("\n-- 每个融资特征落在价格基（前 11 主成分）上的 R² --")
+    print("\n-- 每个融资特征落在价格基（前 11 主成分）上的 R^2 --")
     for c, v in probe.items():
-        print(f"  {c:<18} R² = {v:.3f}")
+        print(f"  {c:<18} R^2 = {v:.3f}")
     print("\n判据: PR 净增 +0.5 以上算真新维度；+0.1 以内是同族数据。")
-    print("      R² 低 + PR 涨 才是正交维度；R² 高说明价格已经隐含了它。")
+    print("      R^2 低 + PR 涨 才是正交维度；R^2 高说明价格已经隐含了它。")
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     merged[["date", "symbol"] + MARGIN_FEATURES].to_parquet(

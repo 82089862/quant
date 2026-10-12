@@ -99,7 +99,7 @@ def build_panel(start: str, end: str, out_path: pathlib.Path | None = None) -> p
                 f"{frozen.name}；改用 {freeze_guard.research_panel_path(start, end).name}")
         out = (pathlib.Path(out_path) if out_path is not None
                else freeze_guard.research_panel_path(start, end))
-        print(f"[store] ⚠ 越界数据（{end} > 冻结边界 {freeze_guard.FREEZE_END}）→ 写研究面板 "
+        print(f"[store] [!] 越界数据（{end} > 冻结边界 {freeze_guard.FREEZE_END}）→ 写研究面板 "
               f"{out.name}，不替换冻结快照（协议 §9.1）")
     else:
         out = (pathlib.Path(out_path) if out_path is not None

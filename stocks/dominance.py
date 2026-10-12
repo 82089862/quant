@@ -6,8 +6,8 @@ margin_factor.py 手挑了 7 档控制集，看到 `m_shortsell_int` 在 4 个�
 
   1. 残差 IC 在"子集大小"上的分布（衰减带）。7 档手选集只是带里的一条线；
      带如果很宽，说明手选档位代表不了全体。
-  2. 优势分析（Budescu 1993）：每个控制变量的平均增量 R² —— 穷举所有不含它的子集，
-     取 R²(S∪{j}) − R²(S) 的均值。平均增量高 = 真独立维度；单变量 R² 高但平均增量低
+  2. 优势分析（Budescu 1993）：每个控制变量的平均增量 R^2 —— 穷举所有不含它的子集，
+     取 R^2(S∪{j}) - R^2(S) 的均值。平均增量高 = 真独立维度；单变量 R^2 高但平均增量低
      = 与别的变量共线搭便车（§3.6 陷阱二的成因量化）。
 
 判据（沿用 §3.5 已有的量级线，不自造阈值）：
@@ -27,7 +27,7 @@ margin_factor.py 手挑了 7 档控制集，看到 `m_shortsell_int` 在 4 个�
 自检（跑完自动核）：
   - 子集数合计 = 2^11
   - 全量控制集（k=11）的残差 IC 必须等于 out/margin_factor_control_diag.csv 的「全部11个」
-  - 全量控制集的 R² 必须等于 out/margin_factor_orth.csv 的 r2_vs_price
+  - 全量控制集的 R^2 必须等于 out/margin_factor_orth.csv 的 r2_vs_price
     （两者都必须按各自因子的 NaN 单独剔行 —— 第一版共用一份行集，差 1e-4 被判为不一致）
 
 用法:
@@ -85,14 +85,14 @@ def _ranks(a: np.ndarray) -> np.ndarray:
 
 def subset_scan(x: np.ndarray, y: np.ndarray, rrank: np.ndarray,
                 masks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """一个截面上扫全部子集，返回 (M,) 残差 IC 与 (M,) R²。x/y 已按该因子的 NaN 剔行。"""
+    """一个截面上扫全部子集，返回 (M,) 残差 IC 与 (M,) R^2。x/y 已按该因子的 NaN 剔行。"""
     xc = x - x.mean(axis=0)
     yc = y - y.mean()
     if not yc.any():
         nan = np.full(len(masks), np.nan)
         return nan, nan
     # 先标准化：m_bal_chg 这类因子有极端值，不缩放会让正规方程平方条件数，
-    # 与 margin_factor.py 的 SVD 解差到 1e-6。R² 与秩 IC 都对此不变。
+    # 与 margin_factor.py 的 SVD 解差到 1e-6。R^2 与秩 IC 都对此不变。
     sx = xc.std(axis=0)
     xc = xc / np.where(sx > 0, sx, 1.0)
     yc = yc / yc.std()
@@ -125,7 +125,7 @@ def subset_scan(x: np.ndarray, y: np.ndarray, rrank: np.ndarray,
 def per_date_scan(panel: pd.DataFrame, fwd: pd.DataFrame, ok: pd.DataFrame,
                   dates: pd.DatetimeIndex, masks: np.ndarray
                   ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    """逐期扫描，返回 ({因子: (期数, M) IC}, {因子: (期数, M) R²})。"""
+    """逐期扫描，返回 ({因子: (期数, M) IC}, {因子: (期数, M) R^2})。"""
     cols = [f"r_{c}" for c in CONTROLS]
     ic_hist: dict[str, list] = {f: [] for f in mf.FACTORS}
     r2_hist: dict[str, list] = {f: [] for f in mf.FACTORS}
@@ -158,7 +158,7 @@ def per_date_scan(panel: pd.DataFrame, fwd: pd.DataFrame, ok: pd.DataFrame,
 
 
 def dominance(r2: np.ndarray, masks: np.ndarray) -> np.ndarray:
-    """每个控制变量的平均增量 R²。"""
+    """每个控制变量的平均增量 R^2。"""
     out = np.empty(len(CONTROLS))
     for j in range(len(CONTROLS)):
         w = np.array([m for m in range(len(masks)) if not masks[m, j]])
@@ -193,7 +193,7 @@ def self_check(by_size: pd.DataFrame, r2_full: pd.Series) -> None:
         d = abs(ic_full - float(diag.loc[f, "全部11个"]))
         assert d < 1e-9, f"{f} 全量残差 IC 对不上 margin_factor.py: 差 {d:.2e}"
         d2 = abs(float(r2_full[f]) - float(orth.loc[f, "r2_vs_price"]))
-        assert d2 < 1e-9, f"{f} 全量 R² 对不上 margin_factor.py: 差 {d2:.2e}"
+        assert d2 < 1e-9, f"{f} 全量 R^2 对不上 margin_factor.py: 差 {d2:.2e}"
     print("[dom] 自检通过：子集数、全量残差 IC（<1e-9）、全量 R2（<1e-9）与 margin_factor.py 一致")
 
 

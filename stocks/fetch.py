@@ -261,7 +261,7 @@ def main() -> None:
             print(f"[fetch] 拒绝：--end {end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
                   f"要拉未来数据加 --allow-future（只进研究流程，不得替换冻结快照）", file=sys.stderr)
             return 2
-        print(f"[fetch] ⚠ 越界拉取（--allow-future）：{end} > 冻结边界 {freeze_guard.FREEZE_END}；"
+        print(f"[fetch] [!] 越界拉取（--allow-future）：{end} > 冻结边界 {freeze_guard.FREEZE_END}；"
               f"新数据只能进研究流程，冻结快照的完整性由 freeze_guard.py verify 守")
 
     if args.backfill_share:

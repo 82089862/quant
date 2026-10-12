@@ -620,7 +620,7 @@ def orth_scan(fac: pd.DataFrame, ctrl: dict, fwd: pd.DataFrame, dates: pd.Dateti
               masks: np.ndarray) -> tuple[list[float], np.ndarray, np.ndarray]:
     """逐期截面：因子值对控制集回归取残差，再算残差的秩 IC。
 
-    返回 (对账用 IC 列表, IC 矩阵, R² 矩阵)。对账列表在**因子自己的行集**上算，
+    返回 (对账用 IC 列表, IC 矩阵, R^2 矩阵)。对账列表在**因子自己的行集**上算，
     与 factors.ic_series 同口径，用来证明这套接线没接错；IC 矩阵用「控制变量齐全」的行集，
     两个行集不同（缺控制特征的股票会被剔掉），所以只能比量级不能比相等。
 
@@ -665,9 +665,9 @@ def orth_verdict(ic_raw: float, ic_by_mask: np.ndarray, r2_all: float) -> tuple[
                              f"{singles[j]:+.4f}（< {kill:.4f}）", float(singles[j]))
     ic_all = float(ic_by_mask[-1]) if len(ic_by_mask) else np.nan
     if np.isfinite(ic_all) and abs(ic_all) > kill:
-        return "部分独立", f"全 11 控制后残差 IC 仍 {ic_all:+.4f}（R² {r2_all:.3f}）", float(singles[j])
+        return "部分独立", f"全 11 控制后残差 IC 仍 {ic_all:+.4f}（R^2 {r2_all:.3f}）", float(singles[j])
     return ("被多变量联手吃掉", f"单控制最弱只到 {singles[j]:+.4f}，全 11 控制后 "
-                              f"{ic_all:+.4f}（R² {r2_all:.3f}）", float(singles[j]))
+                              f"{ic_all:+.4f}（R^2 {r2_all:.3f}）", float(singles[j]))
 
 
 def ic_stats(ic: pd.Series, split: str) -> dict:

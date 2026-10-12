@@ -1,7 +1,7 @@
 """信息容量盘点：8 个数值列里到底有几个独立维度。
 
 用途（建仓前判重，省掉一整轮回测）：
-  1. 任何新想法先投影到既有基上算 R²（见 basis_r2），>0.95 的直接扔掉。
+  1. 任何新想法先投影到既有基上算 R^2（见 basis_r2），>0.95 的直接扔掉。
   2. 有效维度 D 是负控的理论来源：1100 万行只采样了 D 维空间里的一小块。
   3. D 饱和后继续做特征工程不再增加信息，只有换数据或换目标才有用。
 
@@ -172,7 +172,7 @@ def redundancy_pairs(corr: np.ndarray, thresh: float = 0.9) -> pd.DataFrame:
 
 
 def multivariate_r2(x: np.ndarray) -> pd.DataFrame:
-    """每个特征在其余全部特征上的 R²。R²>0.95 = 不含新信息（成对低相关也能抓到）。"""
+    """每个特征在其余全部特征上的 R^2。R^2>0.95 = 不含新信息（成对低相关也能抓到）。"""
     rows = []
     for k, name in enumerate(FEATURES):
         others = np.delete(x, k, axis=1)
@@ -190,7 +190,7 @@ def pr_of(x: np.ndarray) -> float:
 
 
 def effective_dims(eigvals: np.ndarray) -> dict:
-    """参与率 PR=(Σλ)²/Σλ²，以及解释 90% / 95% 方差所需主成分数。"""
+    """参与率 PR=(Σλ)^2/Σλ^2，以及解释 90% / 95% 方差所需主成分数。"""
     ev = np.sort(eigvals)[::-1]
     share = np.cumsum(ev) / ev.sum()
 
@@ -216,7 +216,7 @@ def self_check(x: np.ndarray) -> None:
     b = basis_r2(x, rng.random(len(x)))
     assert abs(a - 1.0) < 1e-6, f"自投影应为 1，实得 {a}"
     assert b < 0.05, f"噪声不该被解释，实得 {b}"
-    print(f"[capacity] 自检通过：自投影 R²={a:.6f}，噪声 R²={b:.6f}")
+    print(f"[capacity] 自检通过：自投影 R^2={a:.6f}，噪声 R^2={b:.6f}")
 
 
 def main() -> None:
@@ -279,20 +279,20 @@ def main() -> None:
     else:
         print(pairs.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
-    print("\n-- 多元冗余：每个特征在其余 22 维上的 R² --")
+    print("\n-- 多元冗余：每个特征在其余 22 维上的 R^2 --")
     print(r2.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
     dead = r2[r2["r2_vs_others"] > 0.95]["feature"].tolist()
-    print(f"\n零新信息特征（R²>0.95，可直接删）: {dead if dead else '无'}")
+    print(f"\n零新信息特征（R^2>0.95，可直接删）: {dead if dead else '无'}")
     print(f"独立维度估计: 名义 8 列 -> 派生 {len(FEATURES)} -> 有效 {eff['PR']:.1f}")
 
     print(f"\n-- 判重探针：3 个 FEATURES 之外的特征（10 日动量、10 日波动、5 日换手波动）--")
     for p, v in probe_r2.items():
-        print(f"  {p:<16} 落在前 {eff['n90']} 个主成分上的 R² = {v:.3f}")
+        print(f"  {p:<16} 落在前 {eff['n90']} 个主成分上的 R^2 = {v:.3f}")
     x_all = np.column_stack([x, df[[f"r_{p}" for p in PROBES]].to_numpy()])
     pr_all = pr_of(x_all)
     print(f"  有效维度 {len(FEATURES)} 维 -> 加上 3 个探针 {pr_all:.2f}（净增 {pr_all - eff['PR']:+.2f}）")
-    print("  读法: 纯噪声探针的 R² 应 ≈0；0.6~0.7 只说明大部分被覆盖，"
+    print("  读法: 纯噪声探针的 R^2 应 ≈0；0.6~0.7 只说明大部分被覆盖，"
           "剩下的是插值噪声还是真新维度，看 PR 净增。")
     print("  用法: basis_r2(主成分基, 候选特征) 配 PR 增量，两者都低才值得回测")
 

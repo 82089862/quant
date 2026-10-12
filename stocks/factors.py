@@ -202,7 +202,7 @@ def main() -> None:
     ic_out = OUT_DIR / f"ic_{args.factor}{args.window}.csv"
     if args.research:
         out, ic_out = freeze_guard.research_name(out), freeze_guard.research_name(ic_out)
-        print(f"[factor] ⚠ 研究模式：证据等级 {freeze_guard.verdict_level(True)}（不得当作冻结口径结果）")
+        print(f"[factor] [!] 研究模式：证据等级 {freeze_guard.verdict_level(True)}（不得当作冻结口径结果）")
     pd.DataFrame(curves).to_csv(out)
     ic.to_csv(ic_out, header=["ic"])
     print(f"[factor] 净值 -> {out}")

@@ -4,7 +4,7 @@
 
 纳入的策略（都是公开研报的方法，本文件只实现规则、不引第三方框架）：
   rsrs       光大证券 RSRS：滚动 window 日 high/low 回归 beta -> zscore -> ±0.7 阈值
-  rsrs_r2    中金 QRS 的修正版：beta 乘 R² 再做同一套 zscore 与阈值
+  rsrs_r2    中金 QRS 的修正版：beta 乘 R^2 再做同一套 zscore 与阈值
   icu        中泰证券 ICU 均线：Siegel 重复中位数稳健回归，收盘价穿越即持仓
   icu2       同上，快慢双均线（快线上穿慢线持仓）
   llt        广发证券 低延迟趋势线：LLT 递推线，收盘价在线上方持仓
@@ -75,7 +75,7 @@ def sig_rsrs(d: pd.DataFrame, window: int = 18, zwin: int = 600,
              upper: float = 0.7, lower: float = -0.7, r2: bool = False) -> pd.Series:
     """RSRS / QRS：滚动 high-low 回归 beta（相关系数×标准差比的等价形式），再做 zscore。
 
-    r2=True 用 beta×corr²（中金修正版），抑制高波动期虚高的 beta。
+    r2=True 用 beta×corr^2（中金修正版），抑制高波动期虚高的 beta。
     阈值外给 ±1，阈值内维持前值；只做多，所以把 -1 压成 0。
     """
     high, low = d["high"], d["low"]

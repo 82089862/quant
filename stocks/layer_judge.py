@@ -5,10 +5,10 @@
 产物 `out/_judge*.md` 里、无产出代码 —— 所以冻结点只能冻结 1/4 条判据。本脚本补上产出，
 定义如下（2026-10-12 用 `Alpha191候选分层回测计划.md` §10.5 的实测值逐项反推并核对）：
 
-  ② 去均值相关 = 5 个组各自的「月收益 − 当期 5 组均值」序列与反转基线同组序列的 Pearson，
+  ② 去均值相关 = 5 个组各自的「月收益 - 当期 5 组均值」序列与反转基线同组序列的 Pearson，
                  取 5 组平均。对 a144 实测 0.350、a042 0.424（与计划 §10.5 逐位一致）
-  ③ 秩相关均值 = 每个自然月末 spearman(因子值截面, mom20 截面) 的均值。a144 −0.090、a042 −0.241
-  ④ 样本外年化 = 净值曲线月频重采样、切 date > split、last/first ** (1/年数) − 1。
+  ③ 秩相关均值 = 每个自然月末 spearman(因子值截面, mom20 截面) 的均值。a144 -0.090、a042 -0.241
+  ④ 样本外年化 = 净值曲线月频重采样、切 date > split、last/first ** (1/年数) - 1。
                  a144 20.4205%（计划 §10.5 报 20.42%）
 
 冻结保护（2026-10-12 补，`freeze_guard.py` + 协议 §9.1）：默认只允许在**冻结快照**上出判据结论 ——
@@ -159,7 +159,7 @@ def main() -> None:
               f"要用越界数据做研究，加 --research（产物会标为非独立验证）", file=sys.stderr)
         sys.exit(2)
     if args.research:
-        print("[judge] ⚠ 研究模式：允许非冻结/越界数据；产物标「研究数据（非独立验证）」，"
+        print("[judge] [!] 研究模式：允许非冻结/越界数据；产物标「研究数据（非独立验证）」，"
               "不得当作独立验证（协议 §9.1）", file=sys.stderr)
 
     if args.factors:
@@ -185,7 +185,7 @@ def main() -> None:
                     else freeze_guard.verify(panel_path) + freeze_guard.verify_artifacts(out_dir))
         if problems:
             for m in problems:
-                print(f"[judge] ✗ 冻结校验不过：{m}", file=sys.stderr)
+                print(f"[judge] [X] 冻结校验不过：{m}", file=sys.stderr)
             print("[judge] 拒绝在非冻结面板/非冻结产物上出判据结论（协议 §9.1）；"
                   "研究用途加 --research", file=sys.stderr)
             sys.exit(1)

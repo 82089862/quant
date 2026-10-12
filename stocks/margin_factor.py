@@ -9,7 +9,7 @@
   3. surrogate 噪声底：每月内自行打乱因子值（保留因子边际分布、破坏因子-收益关系），
      跑同一套 IC 计算。任何不超过噪声底的"发现"都不是发现。
   4. 涨跌停剔除：信号日涨跌停的样本剔除（次日买不到）。
-  5. 正交性预检已在 margin_probe.py 做过：m_buy_int 落在价格基上的 R²=0.014。
+  5. 正交性预检已在 margin_probe.py 做过：m_buy_int 落在价格基上的 R^2=0.014。
 
 用法:
     uv run margin_factor.py
@@ -125,7 +125,7 @@ def orthogonal_ic(fp: pd.DataFrame, px: pd.DataFrame, fwd: pd.DataFrame, ok: pd.
     """把因子对价格因子截面正交化，重算 IC。
 
     共同暴露检验：若残差 IC 掉到 0，说明这个因子只是价格因子的换皮。
-    返回 (逐期残差 IC, 因子被价格因子解释的平均 R²)。
+    返回 (逐期残差 IC, 因子被价格因子解释的平均 R^2)。
     """
     ics, r2s = [], []
     for d in dates:

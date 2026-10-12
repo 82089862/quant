@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS factor_screen (
   ic_nocontrol DOUBLE COMMENT '测试段无控制 IC（对账列：必须逐位等于 ic_test）',
   ic_single_min DOUBLE COMMENT '测试段被单个控制变量打回后的最弱 |IC|',
   ic_allctrl DOUBLE COMMENT '测试段对 11 个控制变量正交化后的残差 IC',
-  r2_allctrl DOUBLE COMMENT '被 11 个控制变量解释的 R²',
+  r2_allctrl DOUBLE COMMENT '被 11 个控制变量解释的 R^2',
   orth_n INT COMMENT '正交化用到的截面期数',
   verdict VARCHAR(24) COMMENT 'F3 确凿换皮 / 被多变量联手吃掉 / 部分独立 / F5 本来就无信号',
   verdict_why VARCHAR(255) COMMENT '判读依据的量化说明',
