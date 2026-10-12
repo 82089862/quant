@@ -45,12 +45,12 @@ quant/
     power/假设登记表.md               电力域假设记录块（ID 用 P）
   stocks/                            股票域
     universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
-    layer_judge.py  capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
-    downturn.py  import_mysql.py
+    layer_judge.py  freeze_guard.py  capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
+    test_freeze_guard.py  downturn.py  import_mysql.py
     data/
       universe.parquet               8992 条证券档案（含 1192 只已退市）
       daily/{symbol}.parquet         5476 个分片，1145 万行，后复权日线（含 253 只退市股）
-      panel_2015_2026.parquet        合成面板 319MB（334,916,252 字节），横截面查询走它
+      panel_2015_2026.parquet        合成面板 319MB（334,916,252 字节），横截面查询走它；**冻结快照**，锚点见协议 §9.1、校验走 `freeze_guard.py verify`
       failed.txt                     拉取失败清单
     out/                             净值曲线与 IC 的 CSV
   power/                             电力交易域（骨架，见 power/README.md）
@@ -65,11 +65,13 @@ quant/
 | 文件 | 职责 |
 |---|---|
 | `stocks/universe.py` | 拉 baostock 全量证券档案 -> `stocks/data/universe.parquet` |
-| `stocks/fetch.py` | 拉新浪后复权日线 -> `stocks/data/daily/{symbol}.parquet`，原子写、断点续传。`--delisted` 连同窗口内退市股一起拉（255 只，走**新浪直连兜底**：akshare 对退市股会崩在 amount 接口，而新浪 hist/hfq 两条接口对退市股是好的）；`--backfill-share` 用 baostock 的 `volume/turn` 反推补退市股的流通股本 |
-| `stocks/store.py` | 读数据的唯一入口。`load_daily` 单只 / `load_panel` 横截面 / `build_panel` 合成面板 / `delist_dates` 退市日表（喂给回测引擎） |
+| `stocks/fetch.py` | 拉新浪后复权日线 -> `stocks/data/daily/{symbol}.parquet`，原子写、断点续传。`--end` 默认 = **冻结边界**（协议 §9.1），越界必须显式 `--allow-future`。`--delisted` 连同窗口内退市股一起拉（255 只，走**新浪直连兜底**：akshare 对退市股会崩在 amount 接口，而新浪 hist/hfq 两条接口对退市股是好的）；`--backfill-share` 用 baostock 的 `volume/turn` 反推补退市股的流通股本 |
+| `stocks/store.py` | 读数据的唯一入口。`load_daily` 单只 / `load_panel` 横截面 / `build_panel` 合成面板 / `delist_dates` 退市日表（喂给回测引擎）。越界数据（end > 冻结边界）改名 `panel_{start}_{end}.parquet` 且**拒绝**写冻结快照 |
 | `stocks/backtest.py` | 日频撮合引擎。`run_single` 单标的 / `run_portfolio` 多标的组合 |
 | `stocks/factors.py` | 单因子（动量/反转）+ 月度分层回测 + IC |
-| `stocks/layer_judge.py` | 分层回测判据 ②③④ 的可复现产出（去均值相关 / 因子值截面秩相关 / 样本外年化）+ 4 条合一判定，写 `out/layer_judge.csv`。此前这三列无产出代码 |
+| `stocks/layer_judge.py` | 分层回测判据 ②③④ 的可复现产出（去均值相关 / 因子值截面秩相关 / 样本外年化）+ 4 条合一判定，写 `out/layer_judge.csv`。读面板前先过冻结校验，不过即非零退出；`--research` 才允许越界/非冻结面板，产物另落盘并标「非独立验证」 |
+| `stocks/freeze_guard.py` | 冻结快照的机器保护（协议 §9.1）：读**实际文件内容**核对 sha256 / 字节数 / 行数 / 最大日期 / 交易日数 / 标的数，不符即非零退出。`verify` / `stats` 两个子命令 |
+| `stocks/test_freeze_guard.py` | 冻结保护的断言测试：覆盖检测 / 静默改写 / 越界 / 研究模式分流 / 两个入口拦截 / 冻结口径结果一致 |
 | `stocks/leadlag.py` | 时序滞后联动挖掘：锚点遍历全市场 + 多重检验校正 + surrogate 噪声底 + 样本内外分割 |
 | `stocks/check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
 | `stocks/test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |

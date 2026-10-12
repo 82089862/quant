@@ -6,11 +6,15 @@
 两条路径口径已由 check.py 的断言⑤逐点对齐。
 
 用法:
-    uv run fetch.py --start 2015-01-01            # 拉全部缺的
+    uv run fetch.py --start 2015-01-01            # 拉全部缺的（默认拉到冻结边界）
     uv run fetch.py --start 2015-01-01 --limit 20 # 先试拉 20 只
     uv run fetch.py --start 2015-01-01 --retry    # 只重试 failed.txt 里的
     uv run fetch.py --start 2015-01-01 --delisted # 连同窗口内退市股（255 只）一起拉
     uv run fetch.py --start 2015-01-01 --backfill-share  # 给退市股补 outstanding_share
+    uv run fetch.py --allow-future                # 拉到今天（越界数据，只能进研究流程）
+
+冻结边界（协议 §9.1）：默认 --end = 冻结日，且拒绝越过；要拉更新的数据必须显式 --allow-future，
+拉下来的新数据只进研究流程，**不得替换冻结快照**（合成面板侧由 store.build_panel 拦截）。
 """
 from __future__ import annotations
 
@@ -32,6 +36,9 @@ from akshare.stock.stock_zh_a_sina import (
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+import freeze_guard  # noqa: E402
+
 DATA_DIR = ROOT / "data"
 DAILY_DIR = DATA_DIR / "daily"
 UNIVERSE_PATH = DATA_DIR / "universe.parquet"
@@ -232,7 +239,10 @@ def load_symbols(start: str, end: str, limit: int | None,
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2015-01-01")
-    ap.add_argument("--end", default=pd.Timestamp.today().strftime("%Y-%m-%d"))
+    ap.add_argument("--end", default=None,
+                    help=f"拉取上界；默认 = 冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）")
+    ap.add_argument("--allow-future", action="store_true",
+                    help="显式允许拉取冻结边界之后的数据（只进研究流程，不替换冻结快照）")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--retry", action="store_true", help="只重试 failed.txt")
     ap.add_argument("--delisted", action="store_true",
@@ -240,6 +250,19 @@ def main() -> None:
     ap.add_argument("--backfill-share", action="store_true",
                     help="给退市股补 outstanding_share/turnover（baostock 反推），拉完退市股后跑")
     args = ap.parse_args()
+
+    if args.end is None:
+        end = (pd.Timestamp.today().strftime("%Y-%m-%d") if args.allow_future
+               else freeze_guard.FREEZE_END)
+    else:
+        end = args.end
+    if end > freeze_guard.FREEZE_END:
+        if not args.allow_future:
+            print(f"[fetch] 拒绝：--end {end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
+                  f"要拉未来数据加 --allow-future（只进研究流程，不得替换冻结快照）", file=sys.stderr)
+            return 2
+        print(f"[fetch] ⚠ 越界拉取（--allow-future）：{end} > 冻结边界 {freeze_guard.FREEZE_END}；"
+              f"新数据只能进研究流程，冻结快照的完整性由 freeze_guard.py verify 守")
 
     if args.backfill_share:
         syms = delisted_symbols(args.start)
@@ -251,13 +274,13 @@ def main() -> None:
         symbols = [s.strip() for s in FAILED_PATH.read_text().split() if s.strip()]
         print(f"[fetch] 重试 {len(symbols)} 只")
     else:
-        symbols = load_symbols(args.start, args.end, args.limit, args.delisted)
+        symbols = load_symbols(args.start, end, args.limit, args.delisted)
         HAVE = {p.stem for p in DAILY_DIR.glob("*.parquet")}
         symbols = [s for s in symbols if s not in HAVE]
-        print(f"[fetch] 待拉取 {len(symbols)} 只，区间 {args.start} ~ {args.end}")
+        print(f"[fetch] 待拉取 {len(symbols)} 只，区间 {args.start} ~ {end}")
 
     t0 = time.time()
-    failed = fetch_all(symbols, args.start, args.end, DAILY_DIR)
+    failed = fetch_all(symbols, args.start, end, DAILY_DIR)
     FAILED_PATH.write_text("\n".join(failed))
     print(f"[fetch] 总耗时 {time.time() - t0:.0f}s，失败清单 {FAILED_PATH}")
 

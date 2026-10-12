@@ -8,10 +8,14 @@
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import pandas as pd
 
 ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+import freeze_guard  # noqa: E402
+
 DATA_DIR = ROOT / "data"
 DAILY_DIR = DATA_DIR / "daily"
 UNIVERSE_PATH = DATA_DIR / "universe.parquet"
@@ -80,10 +84,26 @@ def trading_dates(symbols: list[str], start: str, end: str,
 
 
 def build_panel(start: str, end: str, out_path: pathlib.Path | None = None) -> pathlib.Path:
-    """把所有分片合成一个 parquet，供横截面查询。走 DuckDB，不经过 pandas。"""
+    """把所有分片合成一个 parquet，供横截面查询。走 DuckDB，不经过 pandas。
+
+    end 越过冻结边界（协议 §9.1）时：产物改名带完整日期，并**拒绍写冻结快照**——
+    越界数据只能进研究流程，否则冻结判据会在不知情的情况下读到未来数据。
+    """
     import duckdb
 
-    out = out_path or (DATA_DIR / f"panel_{start[:4]}_{end[:4]}.parquet")
+    if end > freeze_guard.FREEZE_END:
+        frozen = freeze_guard.frozen_panel_path()
+        if out_path is not None and pathlib.Path(out_path).resolve() == frozen.resolve():
+            raise ValueError(
+                f"拒绍：越界数据（end={end} > 冻结边界 {freeze_guard.FREEZE_END}）不得写冻结快照 "
+                f"{frozen.name}；改用 {freeze_guard.research_panel_path(start, end).name}")
+        out = (pathlib.Path(out_path) if out_path is not None
+               else freeze_guard.research_panel_path(start, end))
+        print(f"[store] ⚠ 越界数据（{end} > 冻结边界 {freeze_guard.FREEZE_END}）→ 写研究面板 "
+              f"{out.name}，不替换冻结快照（协议 §9.1）")
+    else:
+        out = (pathlib.Path(out_path) if out_path is not None
+               else DATA_DIR / f"panel_{start[:4]}_{end[:4]}.parquet")
     src = (DAILY_DIR / "*.parquet").as_posix()
     print(f"[store] 合成面板 {start} ~ {end}")
     duckdb.sql(f"""

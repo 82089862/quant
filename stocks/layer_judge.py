@@ -11,12 +11,17 @@
   ④ 样本外年化 = 净值曲线月频重采样、切 date > split、last/first ** (1/年数) − 1。
                  a144 20.4205%（计划 §10.5 报 20.42%）
 
+冻结保护（2026-10-12 补，`freeze_guard.py` + 协议 §9.1）：默认只允许在**冻结快照**上出判据结论 ——
+读面板前先核对 sha256/字节/行数/最大日期/交易日数/标的数，不符即非零退出；`--end` 越过冻结边界
+默认拒绝。要用越界数据/非冻结面板做研究，必须显式 `--research`，产物另落盘并标「研究数据（非独立验证）」。
+
 用法:
-    uv run stocks/layer_judge.py                       # 读 out/layers_*_5g.csv 全部候选
+    uv run stocks/layer_judge.py                       # 读 out/layers_*_5g.csv 全部候选（冻结口径）
     uv run stocks/layer_judge.py --factors alpha144,alpha042
     uv run stocks/layer_judge.py --split 2020-12-31
+    uv run stocks/layer_judge.py --research --panel data/panel_2015_2026_2026-11-30.parquet  # 研究用
 
-产物: out/layer_judge.csv（因子 × 4 条判据 + 判定），stdout 打表。
+产物: out/layer_judge.csv（冻结口径）/ out/layer_judge_research.csv（研究口径），stdout 打表。
 """
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import factors  # noqa: E402
 import alpha191  # noqa: E402
+import freeze_guard  # noqa: E402
 
 DATA_DIR = ROOT / "data"
 OUT_DIR = ROOT / "out"
@@ -134,12 +140,24 @@ def main() -> None:
     ap.add_argument("--groups", type=int, default=5)
     ap.add_argument("--split", default=SAMPLE_OUT_SPLIT)
     ap.add_argument("--start", default="2015-01-01")
-    ap.add_argument("--end", default="2026-10-09")
+    ap.add_argument("--end", default=freeze_guard.FREEZE_END,
+                    help=f"数据上界；默认 = 冻结边界 {freeze_guard.FREEZE_END}，超过必须加 --research")
+    ap.add_argument("--panel", default="", help="面板路径；默认 = 冻结快照")
+    ap.add_argument("--research", action="store_true",
+                    help="研究模式：允许越界数据/非冻结面板；产物另落盘并标「非独立验证」")
+    ap.add_argument("--out", default="", help="产物路径；默认 out/layer_judge[_research].csv")
     ap.add_argument("--no-rank", action="store_true", help="跳过 ③（不读面板，冒烟用）")
     args = ap.parse_args()
 
     self_check()
     split = pd.Timestamp(args.split)
+    if args.end > freeze_guard.FREEZE_END and not args.research:
+        print(f"[judge] 拒绝：--end {args.end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
+              f"要用越界数据做研究，加 --research（产物会标为非独立验证）", file=sys.stderr)
+        sys.exit(2)
+    if args.research:
+        print("[judge] ⚠ 研究模式：允许非冻结/越界数据；产物标「研究数据（非独立验证）」，"
+              "不得当作独立验证（协议 §9.1）", file=sys.stderr)
 
     if args.factors:
         names = [x.strip() for x in args.factors.split(",") if x.strip()]
@@ -151,10 +169,22 @@ def main() -> None:
     base = pd.read_csv(layer_path(BASELINE_NAME, args.groups), parse_dates=["date"]).set_index("date")
 
     wide = mom = None
-    panel_path = DATA_DIR / f"panel_{args.start[:4]}_{args.end[:4]}.parquet"
+    if args.panel:
+        panel_path = pathlib.Path(args.panel)
+    elif args.research:
+        panel_path = freeze_guard.research_panel_path(args.start, args.end)
+    else:
+        panel_path = freeze_guard.frozen_panel_path()
     if not args.no_rank:
+        problems = [] if args.research else freeze_guard.verify(panel_path)
+        if problems:
+            for m in problems:
+                print(f"[judge] ✗ 冻结校验不过：{m}", file=sys.stderr)
+            print("[judge] 拒绝在非冻结面板上出判据结论（协议 §9.1）；研究用途加 --research",
+                  file=sys.stderr)
+            sys.exit(1)
         if not panel_path.exists():
-            print(f"[judge] 找不到 {panel_path}，跳过 3（--no-rank 同效）", file=sys.stderr)
+            print(f"[judge] 找不到 {panel_path}，跳过 3（研究模式请显式 --panel）", file=sys.stderr)
         else:
             print(f"[judge] 读 {panel_path.name}（03 需要）")
             wide = alpha191.load_wide(panel_path, None)
@@ -186,10 +216,16 @@ def main() -> None:
               f"3秩相关 {r['秩相关均值']:+.3f}  4样本外 {r['样本外年化']:+.2%}  -> {r['判定']}")
 
     out = pd.DataFrame(rows)
+    out["证据等级"] = freeze_guard.verdict_level(args.research)
     OUT_DIR.mkdir(exist_ok=True)
-    dst = OUT_DIR / "layer_judge.csv"
+    if args.out:
+        dst = pathlib.Path(args.out)
+    else:
+        dst = OUT_DIR / ("layer_judge_research.csv" if args.research else "layer_judge.csv")
     out.to_csv(dst, index=False)
     n_pass = int((out["判定"] == "通过").sum()) if len(out) else 0
+    print(f"[judge] 证据等级 {freeze_guard.verdict_level(args.research)}"
+          f"（冻结 {freeze_guard.FREEZE_COMMIT[:7]} / {freeze_guard.FREEZE_TS}）")
     print(f"[judge] {len(out)} 个候选，通过 {n_pass} 个 -> {dst}")
 
 
