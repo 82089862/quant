@@ -48,7 +48,7 @@ quant/
     data/
       universe.parquet               8992 条证券档案（含 1192 只已退市）
       daily/{symbol}.parquet         5476 个分片，1145 万行，后复权日线（含 253 只退市股）
-      panel_2015_2026.parquet        合成面板 335MB，横截面查询走它
+      panel_2015_2026.parquet        合成面板 319MB（334,916,252 字节），横截面查询走它
       failed.txt                     拉取失败清单
     out/                             净值曲线与 IC 的 CSV
   power/                             电力交易域（骨架，见 power/README.md）
