@@ -45,7 +45,7 @@ quant/
     power/假设登记表.md               电力域假设记录块（ID 用 P）
   stocks/                            股票域
     universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
-    capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
+    layer_judge.py  capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
     downturn.py  import_mysql.py
     data/
       universe.parquet               8992 条证券档案（含 1192 只已退市）
@@ -69,6 +69,7 @@ quant/
 | `stocks/store.py` | 读数据的唯一入口。`load_daily` 单只 / `load_panel` 横截面 / `build_panel` 合成面板 / `delist_dates` 退市日表（喂给回测引擎） |
 | `stocks/backtest.py` | 日频撮合引擎。`run_single` 单标的 / `run_portfolio` 多标的组合 |
 | `stocks/factors.py` | 单因子（动量/反转）+ 月度分层回测 + IC |
+| `stocks/layer_judge.py` | 分层回测判据 ②③④ 的可复现产出（去均值相关 / 因子值截面秩相关 / 样本外年化）+ 4 条合一判定，写 `out/layer_judge.csv`。此前这三列无产出代码 |
 | `stocks/leadlag.py` | 时序滞后联动挖掘：锚点遍历全市场 + 多重检验校正 + surrogate 噪声底 + 样本内外分割 |
 | `stocks/check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
 | `stocks/test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |
