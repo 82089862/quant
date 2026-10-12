@@ -273,7 +273,7 @@ def verify_factor(conn, errors: list[str]) -> None:
                         "AND verdict = '部分独立' ORDER BY abs(ic_allctrl) DESC").fetchall()
     log(f"过 Bonferroni + 训练测试同号 + 部分独立: {len(keep)} 个")
     for r in keep:
-        print(f"      {r[0]}  残差 IC {r[1]:+.4f}  R² {r[2]:.3f}  t {r[3]:+.2f}")
+        print(f"      {r[0]}  残差 IC {r[1]:+.4f}  R2 {r[2]:.3f}  t {r[3]:+.2f}")
 
 
 def main() -> None:

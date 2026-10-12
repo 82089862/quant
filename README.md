@@ -311,9 +311,9 @@ uv run stocks/timing.py --symbols sh000300,sh000905,sh000016,sh000001,sz399006 -
 
 | 表 | 行数 | 结构 |
 |---|---|---|
-| `daily` | 11,022,483（**退市股补充前的旧快照**；补后面板是 11,450,179 行，要同步得重跑 `load`） | `panel_*.parquet` 的镜像。`PRIMARY KEY(symbol, date)` + `KEY(date)`，9 个数值列全 `DOUBLE`（与 parquet 同精度），`date` 是 `DATE` |
+| `daily` | 11,450,179（= 面板行数，2026-10-12 重导后逐值一致） | `panel_*.parquet` 的镜像。`PRIMARY KEY(symbol, date)` + `KEY(date)`，9 个数值列全 `DOUBLE`（与 parquet 同精度），`date` 是 `DATE` |
 | `universe` | 8,992 | `universe.parquet` 的镜像。`PRIMARY KEY(code)`，`code_name` 是 utf8mb4 中文名 |
-| `hypothesis` | 9 | `doc/stocks/假设登记表.md` 的镜像。`PRIMARY KEY(id)`，字段与登记表记录块一一对应；`death_codes` 是逗号串（多码如 `F4,F3`，`FIND_IN_SET` 可直接用） |
+| `hypothesis` | 11 | `doc/stocks/假设登记表.md` 的镜像。`PRIMARY KEY(id)`，字段与登记表记录块一一对应；`death_codes` 是逗号串（多码如 `F4,F3`，`FIND_IN_SET` 可直接用） |
 | `cause_code` | 6 | `doc/死因码表.md` 的镜像。`PRIMARY KEY(code)`，`status` = 在用 / 已废弃 |
 | `timing_screen` | 40 | 择时策略池的筛选结论，一行 = 一个「指数 × 策略」。源是 `stocks/out/timing_pool_summary.csv`。`passed` 在导入时按 1-0.05/检验次数 现算 |
 | `factor_screen` | 191 | Alpha191 因子库的筛选结论，一行 = 一个因子（已算 147 / 跳过 44）。源是 `stocks/out/alpha191_ic.csv`。含正交化对账列 `ic_nocontrol`（必须逐位等于 `ic_test`）与 `verdict` 判读 |
@@ -338,7 +338,7 @@ ORDER BY test_pct DESC LIMIT 5;
 ```
 
 - **`daily` 按年分区**（`PARTITION BY RANGE COLUMNS(date)`，p2015..p2026，12 个）。按日期查已实测裁剪到单个分区；归档旧年份用 `DROP PARTITION` 而不是 DELETE 千万行。
-- 导入走 DuckDB 的 `mysql` 扩展直连（`ATTACH ... (TYPE mysql)` + `INSERT INTO ... SELECT`），**没有中间文件**；实测约 3.2 万行/s，全量 4.5 分钟。按年分批、一年一个 INSERT（单语句即单事务），重跑会跳过已有年份。
+- 导入走 DuckDB 的 `mysql` 扩展直连（`ATTACH ... (TYPE mysql)` + `INSERT INTO ... SELECT`），**没有中间文件**；2026-10-12 实测 11,450,179 行均 4m53s（约 3.9 万行/s）。按年分批、一年一个 INSERT（单语句即单事务），**重跑会跳过已有年份** → 数据变了要重建镜像，得先 `TRUNCATE TABLE quant.daily`（或按年 `DROP PARTITION`）再 `load`，直接 `load` 什么都不会发生。
 - 整库约 2.7GB。
 
 **维护点**：分区没做 `MAXVALUE` 兜底——将来出现 2027 年及以后的数据时 INSERT 会直接报 1526 停下，先加分区再导：
@@ -354,7 +354,7 @@ ALTER TABLE quant.daily ADD PARTITION (PARTITION p2027 VALUES LESS THAN ('2028-0
 - ① 数据层 — 完成。5476 只（含 253 只退市股）/ 1145 万行 / 2015-01-05 起，6 项断言通过。
 - ② 撮合引擎 — 完成。5 项断言通过（对账 / 涨跌停 / 调仓 / 费用）。
 - ③ 因子研究 — 完成。动量与反转、分层回测、IC。
-- ④ MySQL 旁路副本 — 完成。`quant.daily` 1102 万行（**退市股补充前的快照**）/ `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致；`quant.hypothesis` 9 行 / `quant.cause_code` 6 行 + 视图 `v_cause_stat`，`quant.timing_screen` 40 行 / `quant.factor_screen` 191 行（已算 147），都与事实源逐值一致。
+- ④ MySQL 旁路副本 — 完成。`quant.daily` 11,450,179 行（= 面板，2026-10-12 重导）/ `quant.universe` 8992 行，按年分区，抽样与 parquet 完全一致；`quant.hypothesis` 11 行 / `quant.cause_code` 6 行 + 视图 `v_cause_stat`，`quant.timing_screen` 40 行 / `quant.factor_screen` 191 行（已算 147），都与事实源逐值一致。
 - ⑥ 外部策略池 — 择时部分完成：5 指数 × 7 策略 = 35 次检验，Bonferroni 门槛下**通过 0 个**。
 - ⑦ Alpha191 因子库 — 147 个公式自写实现并跑完。裸 IC 过 Bonferroni **90** 个（补退市股后重跑，13 个候选与重跑前**完全一致**），但正交化后判为「部分独立」的只有 **14 个**，其中同时过 Bonferroni 与训练测试同号的 **13 个候选**；剩余两关（控制集 2^11 穷举、surrogate 噪声底）未跑。**14 个候选已接分层回测**（判据事先写死）：5 个过（alpha144/alpha042/alpha139/alpha164/alpha015），其余 9 个死在「年化跑不过反转基线」；已在**退市归零引擎**下复算（见上文「分层回测」一节，基线 G5 年化 7.60%）。没有一个是多因子合成或实盘组合。
 - ⑤ 组合与实盘 — 未做。下一步按性价比排序：基准对比（全市场等权 / 沪深300）> 分年稳定性 > 市值中性化 > 冲击成本估算。实盘通道（QMT/Ptrade）更远。

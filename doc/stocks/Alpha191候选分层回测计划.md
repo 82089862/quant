@@ -302,6 +302,8 @@
 - ~~**`out/alpha191_ic.csv` 待在新面板上重跑一次**（第 9 步，约 20 min）~~ → **已完成（2026-10-12）**：147 个因子在补退市股后的面板上重跑（两次独立跑出同一结果，互为验证）。**13 个候选集完全不变**（集合差为空），判读分布 F3/联手 87/33 → 88/32，过 Bonferroni 94 → 90，`ic_mean` 变化最大 0.0046 / 均值 0.00007 / 标准差 0.0012。⇒ **截面 IC 型判据对退市股偏差不敏感**（对比反转分层 G5 同期掉 36%），这一条比因子本身更值得记。产物已覆盖。
 
 
+**同类缺陷第二例（2026-10-12 修）**：`stocks/import_screen.py:276` 的 `verify` 也 print `R²`，在 cp936 控制台下必抛 `UnicodeEncodeError` 中断 —— 即 `factor_screen` 的入库校验在 Windows 上**从未跑完过**（数据本身没错，被静默跳过的是校验）。改为 `R2`（1 个字符）。触发条件与上面那条完全相同：**只在「有东西要打印」时才炸**，前面所有断言都跑完了、最后一行汇总才死。
+
 命令：`python alpha191.py --only alpha042 --layers alpha042 --groups 5 --out out/_smoke_alpha042_ic.csv`
 产物：`out/layers_alpha042_5g.csv`、`out/alpha191_layers_summary.csv`
 
