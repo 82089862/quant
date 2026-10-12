@@ -9,6 +9,9 @@
   ⑥ 端到端：越界 --end 被拒；被改过的面板在判据入口被拒
   ⑦ fetch 默认不越界、store 不覆盖冻结快照
   ⑧ 端到端：冻结快照上的原有判据结果与已存 out/layer_judge.csv 保持一致
+  ⑨ 锚点事实源：`freeze_anchor.json` 与协议 §9.1 表格逐项一致（此前两处手工同步）
+  ⑩ 冻结口径消费的 layers CSV：被改 / 缺文件 / 锚点外多出产物 → 能检出
+  ⑪ 端到端：产物被改时判据入口非零退出；factors.py / alpha191.py 同一条闸
 
 用法:
     uv run stocks/test_freeze_guard.py          # 全部（含 ~40s 的端到端复算）
@@ -17,6 +20,7 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,6 +57,16 @@ def run(script: str, *argv: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(ROOT / script), *argv],
                           cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
                           errors="replace")
+
+
+def copy_artifacts(dst: pathlib.Path) -> dict:
+    """把冻结口径消费的产物 + 排除文件拷到临时目录（不动 out/）。"""
+    src = fg.artifact_dir()
+    for name in list(fg.artifact_files()) + list(fg.ARTIFACT_EXCLUDE):
+        p = src / name
+        if p.exists():
+            shutil.copy2(p, dst / name)
+    return fg.artifact_files()
 
 
 # ---------------------------------------------------------------- ①②③④ 判据层
@@ -110,6 +124,69 @@ def t_research_path_and_label_disjoint() -> None:
     assert fg.verdict_level(True) != fg.verdict_level(False)
     assert "非独立验证" in fg.verdict_level(True)
     assert "非独立验证" in fg.verdict_level(False)   # 冻结口径也只是同段确认
+
+
+# ---------------------------------------------------------------- ⑨⑩ 锚点与产物
+@case
+def t_anchor_json_matches_doc() -> None:
+    """协议 §9.1 表格里的数字必须与锚点 JSON 一致（此前两处手工同步）。"""
+    doc = (ROOT.parent / "doc" / "研究方法与验证协议.md").read_text(encoding="utf-8")
+    start = doc.index("### 9.1")
+    section = doc[start:doc.index("## 10.", start)]
+    a = fg.anchors()
+    want = [fg.FREEZE_COMMIT, fg.FREEZE_TS, a["sha256"], f"{a['bytes']:,}",
+            f"{a['rows']:,}", a["max_date"], str(a["dates"]), str(a["symbols"])]
+    missing = [w for w in want if w not in section]
+    assert not missing, f"§9.1 里找不到这些锚点值（文档与 JSON 漂了）: {missing}"
+    assert "freeze_anchor.json" in section, "§9.1 没写锚点的事实源文件"
+
+
+@case
+def t_anchor_fields_selfconsistent() -> None:
+    a = fg.anchors()
+    assert set(a) == {"sha256", "bytes", "rows", "max_date", "dates", "symbols"}
+    assert len(a["sha256"]) == 64 and len(fg.FREEZE_COMMIT) == 40
+    assert "+" in fg.FREEZE_TS and fg.FREEZE_END == a["max_date"]
+    assert fg.frozen_panel_path().exists()
+
+
+@case
+def t_real_artifacts_match(tmp: pathlib.Path) -> None:
+    assert fg.verify_artifacts() == [], "out/ 里的冻结产物与锚点不符"
+
+
+@case
+def t_artifact_tampered_detected(tmp: pathlib.Path) -> None:
+    assert copy_artifacts(tmp), "锚点里没有产物，测试无意义"
+    assert fg.verify_artifacts(tmp) == [], "原样拷贝就该通过"
+    victim = tmp / "layers_alpha144_5g.csv"
+    df = pd.read_csv(victim)
+    df["G5"] = df["G5"] * 2.0            # 曲线被换掉，行数/列名不变
+    df.to_csv(victim, index=False)
+    problems = fg.verify_artifacts(tmp)
+    assert problems and any("layers_alpha144_5g.csv" in m for m in problems), problems
+
+
+@case
+def t_artifact_missing_and_extra_detected(tmp: pathlib.Path) -> None:
+    copy_artifacts(tmp)
+    (tmp / "layers_alpha042_5g.csv").unlink()
+    (tmp / "layers_zzz999_5g.csv").write_text("date,G1\n2026-10-09,1\n", encoding="utf-8")
+    problems = fg.verify_artifacts(tmp)
+    assert any("缺文件" in m for m in problems), problems
+    assert any("锚点外的产物" in m and "layers_zzz999_5g.csv" in m for m in problems), problems
+    assert not any("锚点外" in m and "layers_momentum20_5g.csv" in m for m in problems), \
+        "排除清单（动量基线）被当成锚点外产物"
+
+
+@case
+def t_research_names_not_consumable() -> None:
+    """研究产物名必须落在冻结口径的 glob 之外，否则会被当成冻结候选读进去。"""
+    research = fg.research_name(pathlib.Path("out") / "layers_alpha144_5g.csv")
+    assert research.name == "layers_alpha144_5g.research.csv", research.name
+    assert not pathlib.Path(research.name).match(fg.ARTIFACT_GLOB), \
+        "研究产物名仍然匹配判据的 glob（会被当成冻结候选）"
+    assert fg.research_panel_path("2015-01-01", "2026-12-31").name != fg.frozen_panel_path().name
 
 
 # ---------------------------------------------------------------- ⑥⑦ 入口层
@@ -179,6 +256,44 @@ def t_store_research_path_is_not_frozen() -> None:
     assert fg.research_panel_path("2015-01-01", "2026-12-31") != fg.frozen_panel_path()
 
 
+@slow_case
+def t_layer_judge_rejects_tampered_artifact(tmp: pathlib.Path) -> None:
+    """端到端：产物被改过时，判据入口立即拦截（只验面板挡不住这条）。"""
+    copy_artifacts(tmp)
+    victim = tmp / "layers_alpha164_5g.csv"
+    df = pd.read_csv(victim)
+    df["G5"] = df["G5"] * 3.0
+    df.to_csv(victim, index=False)
+    dst = tmp / "lj_should_not_exist.csv"
+    r = run("layer_judge.py", "--out-dir", str(tmp), "--out", str(dst))
+    assert r.returncode == 1, f"产物被改却没拦（rc={r.returncode}）:\n{r.stdout}\n{r.stderr}"
+    assert "冻结校验不过" in (r.stdout + r.stderr)
+    assert not dst.exists(), "校验不过却仍然写了产物"
+
+
+@slow_case
+def t_layer_judge_passes_on_clean_copy(tmp: pathlib.Path) -> None:
+    """正常冻结读取：产物原样拷贝到别处，校验应通过（拦截来自内容而非路径）。"""
+    copy_artifacts(tmp)
+    dst = tmp / "lj_clean.csv"
+    r = run("layer_judge.py", "--out-dir", str(tmp), "--out", str(dst))
+    assert r.returncode == 0, f"干净的冻结产物被误杀:\n{r.stdout}\n{r.stderr}"
+    df = pd.read_csv(dst)
+    assert (df["证据等级"] == fg.verdict_level(False)).all()
+    assert int((df["判定"] == "通过").sum()) == 5, df[["factor", "判定"]].to_dict("records")
+
+
+@slow_case
+def t_factors_and_alpha191_share_the_gate() -> None:
+    """第 2 步审计的调用链：同一条闸 + 研究模式必须显式 --panel。"""
+    r = run("factors.py", "--end", "2026-12-31")
+    assert r.returncode == 2 and "越过冻结边界" in (r.stdout + r.stderr), r.stdout + r.stderr
+    r = run("factors.py", "--research", "--end", "2026-12-31")
+    assert r.returncode == 2 and "--panel" in (r.stdout + r.stderr), r.stdout + r.stderr
+    r = run("alpha191.py", "--end", "2026-12-31")
+    assert r.returncode == 2 and "越过冻结边界" in (r.stdout + r.stderr), r.stdout + r.stderr
+
+
 # ---------------------------------------------------------------- ⑧ 一致性
 @slow_case
 def t_frozen_recompute_consistent(tmp: pathlib.Path) -> None:
@@ -217,7 +332,9 @@ def main() -> int:
             name = fn.__name__
             try:
                 if fn.__code__.co_argcount:
-                    fn(tmp)
+                    sub = tmp / name          # 每个用例一个独立目录，互不污染
+                    sub.mkdir()
+                    fn(sub)
                 else:
                     fn()
             except Exception as exc:                       # noqa: BLE001
@@ -229,9 +346,10 @@ def main() -> int:
           f"（用例总数 {len(cases)}）")
     for name, err in failed:
         print(f"[test] FAIL {name}: {err}")
-    print("[test] 未覆盖（专项测试不演练）：真实 334MB 快照被物理覆盖/删掉（会毁证据，"
-          "用合成面板 + 端到端入口 t_layer_judge_rejects_tampered_panel 替代）；"
-          "多进程并发写面板；磁盘满/权限不足等 I/O 故障路径")
+    print("[test] 未覆盖（专项测试不演练）：真实 334MB 快照/产物被物理删掉后重跑（会毁证据，"
+          "用合成面板 + 端到端入口替代）；多进程并发写面板或产物；磁盘满/权限不足等 I/O 故障路径；"
+          "越界数据的真实拉取与合成（需 --allow-future 联网 + 重建 334MB 面板）；"
+          "研究模式的完整回测链路（需先有研究面板，本轮只测了参数闸与产物命名）")
     return 1 if failed else 0
 
 

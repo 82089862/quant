@@ -45,7 +45,7 @@ quant/
     power/假设登记表.md               电力域假设记录块（ID 用 P）
   stocks/                            股票域
     universe.py  fetch.py  store.py  backtest.py  factors.py  check.py  test_backtest.py
-    layer_judge.py  freeze_guard.py  capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
+    layer_judge.py  freeze_guard.py  freeze_anchor.json  capacity.py  margin_probe.py  margin_factor.py  dominance.py  leadlag.py
     test_freeze_guard.py  downturn.py  import_mysql.py
     data/
       universe.parquet               8992 条证券档案（含 1192 只已退市）
@@ -70,8 +70,9 @@ quant/
 | `stocks/backtest.py` | 日频撮合引擎。`run_single` 单标的 / `run_portfolio` 多标的组合 |
 | `stocks/factors.py` | 单因子（动量/反转）+ 月度分层回测 + IC |
 | `stocks/layer_judge.py` | 分层回测判据 ②③④ 的可复现产出（去均值相关 / 因子值截面秩相关 / 样本外年化）+ 4 条合一判定，写 `out/layer_judge.csv`。读面板前先过冻结校验，不过即非零退出；`--research` 才允许越界/非冻结面板，产物另落盘并标「非独立验证」 |
-| `stocks/freeze_guard.py` | 冻结快照的机器保护（协议 §9.1）：读**实际文件内容**核对 sha256 / 字节数 / 行数 / 最大日期 / 交易日数 / 标的数，不符即非零退出。`verify` / `stats` 两个子命令 |
-| `stocks/test_freeze_guard.py` | 冻结保护的断言测试：覆盖检测 / 静默改写 / 越界 / 研究模式分流 / 两个入口拦截 / 冻结口径结果一致 |
+| `stocks/freeze_guard.py` | 冻结快照的机器保护（协议 §9.1）：读**实际文件内容**核对面板 sha256 / 字节数 / 行数 / 最大日期 / 交易日数 / 标的数、以及冻结口径消费的 `out/layers_*.csv` 哈希，不符即非零退出。子命令 `verify` / `artifacts` / `stats` / `seal`（重新冻结） |
+| `stocks/freeze_anchor.json` | **冻结锚点的唯一事实源**（面板哈希 + 冻结提交/时间戳 + 冻结产物哈希）。协议 §9.1 与 `freeze_guard.py` 都从它取数，`test_freeze_guard.py` 断言两边一致 |
+| `stocks/test_freeze_guard.py` | 冻结保护的断言测试：面板覆盖 / 静默改写 / 日期越界 / 产物哈希不符 / 锚点外产物 / 研究模式分流与标注 / 四个入口拦截 / 文档与 JSON 一致 / 冻结口径结果一致 |
 | `stocks/leadlag.py` | 时序滞后联动挖掘：锚点遍历全市场 + 多重检验校正 + surrogate 噪声底 + 样本内外分割 |
 | `stocks/check.py` | 数据层断言（复权可复现 / 与因子表自洽 / 收益在涨跌停内 / 分片结构） |
 | `stocks/test_backtest.py` | 引擎断言（对账 / 涨跌停 / 调仓 / 费用） |

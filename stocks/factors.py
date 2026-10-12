@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import sys
 
 import duckdb
 import numpy as np
 import pandas as pd
 
 import backtest
+import freeze_guard
 import store
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -147,12 +149,31 @@ def main() -> None:
     ap.add_argument("--window", type=int, default=20)
     ap.add_argument("--groups", type=int, default=5)
     ap.add_argument("--start", default="2015-01-01")
-    ap.add_argument("--end", default="2026-10-09")
+    ap.add_argument("--end", default=freeze_guard.FREEZE_END,
+                    help=f"数据上界；默认 = 冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）")
+    ap.add_argument("--panel", default="", help="面板路径；研究模式必须显式给（避免误读冻结快照）")
+    ap.add_argument("--research", action="store_true",
+                    help="研究模式：允许越界数据；产物另落盘（*.research.csv）标「非独立验证」")
     args = ap.parse_args()
 
-    panel_path = DATA_DIR / f"panel_{args.start[:4]}_{args.end[:4]}.parquet"
-    if not panel_path.exists():
-        panel_path = store.build_panel(args.start, args.end)
+    if args.end > freeze_guard.FREEZE_END and not args.research:
+        print(f"[factor] 拒绝：--end {args.end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
+              f"研究用途加 --research + --panel", file=sys.stderr)
+        sys.exit(2)
+    if args.research and not args.panel:
+        print("[factor] 拒绝：研究模式必须显式 --panel（否则会读到冻结快照，"
+              "让研究数据被当成冻结口径）", file=sys.stderr)
+        sys.exit(2)
+
+    if args.panel:
+        panel_path = pathlib.Path(args.panel)
+        if not panel_path.exists():
+            print(f"[factor] 找不到 {panel_path}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        panel_path = DATA_DIR / f"panel_{args.start[:4]}_{args.end[:4]}.parquet"
+        if not panel_path.exists():
+            panel_path = store.build_panel(args.start, args.end)
 
     closes = load_closes(panel_path)
     dates = closes.index
@@ -178,8 +199,12 @@ def main() -> None:
 
     OUT_DIR.mkdir(exist_ok=True)
     out = OUT_DIR / f"layers_{args.factor}{args.window}_{args.groups}g.csv"
+    ic_out = OUT_DIR / f"ic_{args.factor}{args.window}.csv"
+    if args.research:
+        out, ic_out = freeze_guard.research_name(out), freeze_guard.research_name(ic_out)
+        print(f"[factor] ⚠ 研究模式：证据等级 {freeze_guard.verdict_level(True)}（不得当作冻结口径结果）")
     pd.DataFrame(curves).to_csv(out)
-    ic.to_csv(OUT_DIR / f"ic_{args.factor}{args.window}.csv", header=["ic"])
+    ic.to_csv(ic_out, header=["ic"])
     print(f"[factor] 净值 -> {out}")
 
     totals = [float(s.iloc[-1]) for s in curves.values()]

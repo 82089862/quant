@@ -1,0 +1,33 @@
+{
+  "commit": "3f66f46702dcc4da8241c3adf8d4d7fbbbfc9398",
+  "ts": "2026-10-12T14:01:11+08:00",
+  "panel": {
+    "path": "stocks/data/panel_2015_2026.parquet",
+    "sha256": "e9ba071607dbd4448cf201ac44cd7b9dc471fb62da34b50e4c9ccab3473e10ca",
+    "bytes": 334916252,
+    "rows": 11450179,
+    "max_date": "2026-10-09",
+    "dates": 2858,
+    "symbols": 5476
+  },
+  "artifacts": {
+    "dir": "stocks/out",
+    "files": {
+      "layers_alpha015_5g.csv": "2a48963ee2b43b69f4295d8fab1d2a4236c99a72d836cd5ab3a9fc694b3b5899",
+      "layers_alpha034_5g.csv": "1f13d5b81909894e608c38ec36dbdf109fc54dec0bad66163597a62413fc88ba",
+      "layers_alpha035_5g.csv": "d981db9ba2c7cc2730a04eee1e6bc373c047e424e988324f15a2e7f642523792",
+      "layers_alpha042_5g.csv": "6b527e03e39cd172c43dbc3d8bfe9f46403f7f48c0a52773837d493820eff088",
+      "layers_alpha070_5g.csv": "c2d840b263374e13aa43178e7625076412d160d12055a814f01f3685bcf49893",
+      "layers_alpha078_5g.csv": "4911f1c5df444275313a8b2cd7723b7faf349b3561bf938069616d205af10abe",
+      "layers_alpha081_5g.csv": "d257fa4afeed6124ac31d7c72d79291b449348c4c1ccae78b25836afac2b138d",
+      "layers_alpha088_5g.csv": "b795d933fb82dc72b9f5b8eea4ab04e0cba53fff5b546d9f96ecd070f537d8f6",
+      "layers_alpha107_5g.csv": "876f0538aeba606f87bdd7350804208f68f143ebf4c527772f0a2a01811ef251",
+      "layers_alpha135_5g.csv": "ea0bdac1a3cb611d9c09741970196c80d95bbb38b5f1197d411656d6af9a3a4a",
+      "layers_alpha139_5g.csv": "1466ef14204956c254384b1f81c6873426955d9b23c159009e1fd0f38c864a01",
+      "layers_alpha144_5g.csv": "1598bc62ffd3a4fa20f80a5edff5bff27ac8ef4af37588f999adfd80ffb6e25b",
+      "layers_alpha164_5g.csv": "29df777dd0ae67fbfd1fa19dc7ad93630a1304be4e7aa6ead91b21594725e17e",
+      "layers_alpha184_5g.csv": "3547e57e1f08e65cf804a562a6d75d19d47102a64104a7443b9497caf91aecbf",
+      "layers_reversal20_5g.csv": "f8eb595a5d35a7964d104341d13a69cc5227e7bdca7829dc1525811cf77c610d"
+    }
+  }
+}

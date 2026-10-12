@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import math
 import pathlib
+import sys
 import time
 from statistics import NormalDist
 
@@ -38,6 +39,7 @@ import pandas as pd
 import capacity
 import dominance as dom
 import factors
+import freeze_guard
 import margin_factor as mf
 import store
 
@@ -702,7 +704,11 @@ def gate(rows: list[dict]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="GTJA Alpha191 因子库（自写实现）月度 IC 筛选")
     ap.add_argument("--start", default="2015-01-01")
-    ap.add_argument("--end", default="2026-10-09")
+    ap.add_argument("--end", default=freeze_guard.FREEZE_END,
+                    help=f"数据上界；默认 = 冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）")
+    ap.add_argument("--panel", default="", help="面板路径；研究模式必须显式给（避免误读冻结快照）")
+    ap.add_argument("--research", action="store_true",
+                    help="研究模式：允许越界数据；产物另落盘（*.research.csv）标「非独立验证」")
     ap.add_argument("--split", default="2020-12-31", help="训练/测试分界（该日含在训练段）")
     ap.add_argument("--only", default="", help="只跑这些因子，逗号分隔，冒烟测试用")
     ap.add_argument("--limit-symbols", type=int, default=None, help="只取前 N 只，冒烟测试用")
@@ -714,9 +720,27 @@ def main() -> None:
 
     self_check()
 
-    panel_path = DATA_DIR / f"panel_{args.start[:4]}_{args.end[:4]}.parquet"
-    if not panel_path.exists():
-        panel_path = store.build_panel(args.start, args.end)
+    if args.end > freeze_guard.FREEZE_END and not args.research:
+        print(f"[a191] 拒绝：--end {args.end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
+              f"研究用途加 --research + --panel", file=sys.stderr)
+        sys.exit(2)
+    if args.research and not args.panel:
+        print("[a191] 拒绝：研究模式必须显式 --panel（否则会读到冻结快照，"
+              "让研究数据被当成冻结口径）", file=sys.stderr)
+        sys.exit(2)
+
+    if args.panel:
+        panel_path = pathlib.Path(args.panel)
+        if not panel_path.exists():
+            print(f"[a191] 找不到 {panel_path}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        panel_path = DATA_DIR / f"panel_{args.start[:4]}_{args.end[:4]}.parquet"
+        if not panel_path.exists():
+            panel_path = store.build_panel(args.start, args.end)
+    if args.research:
+        log(f"研究模式：证据等级 {freeze_guard.verdict_level(True)}（产物带 .research 后缀，"
+            f"不得当作冻结口径结果）")
 
     wide = load_wide(panel_path, args.limit_symbols)
     closes = wide["close"]
@@ -736,6 +760,7 @@ def main() -> None:
 
     names = args.only.split(",") if args.only else list(ALPHAS)
     rows: list[dict] = []
+    ics: dict[str, pd.Series] = {}   # 逐期 IC 序列（喂外部状态条件回归，别只留聚合值）
     t0 = time.time()
     for i, name in enumerate(names, 1):
         st = time.time()
@@ -743,6 +768,7 @@ def main() -> None:
             fac = ALPHAS[name](o, h, l, c, v, a, r)
             fac = fac.replace([np.inf, -np.inf], np.nan)
             ic = factors.ic_series(closes, fac.loc[me], dates)
+            ics[name] = ic
         except Exception as exc:
             log(f"{i}/{len(names)} {name} 失败: {type(exc).__name__}: {exc}")
             rows.append({"factor": name, "status": "报错", "reason": f"{type(exc).__name__}: {exc}"})
@@ -776,7 +802,11 @@ def main() -> None:
             # 变量名避开循环里的 st（时间戳），否则会把它覆盖成 list
             try:
                 lay_curves, lay_stats = factors.run_layers(fac, prices, dates, args.groups)
-                pd.DataFrame(lay_curves).to_csv(OUT_DIR / f"layers_{name}_{args.groups}g.csv")
+                if args.research:
+                    lay_out = freeze_guard.research_name(OUT_DIR / f"layers_{name}_{args.groups}g.csv")
+                else:
+                    lay_out = OUT_DIR / f"layers_{name}_{args.groups}g.csv"
+                pd.DataFrame(lay_curves).to_csv(lay_out)
                 for s in lay_stats:
                     lay_rows.append({"factor": name, **s})
             except Exception as exc:
@@ -797,9 +827,21 @@ def main() -> None:
     out = pd.DataFrame(rows).sort_values(["status", "factor"])
     OUT_DIR.mkdir(exist_ok=True)
     path = pathlib.Path(args.out) if args.out else OUT_DIR / "alpha191_ic.csv"
+    if args.research and not args.out:
+        path = freeze_guard.research_name(path)
     out.to_csv(path, index=False)
+    # 逐期 IC 序列落盘。shortcut: 全量跑会覆盖这份 13 因子版（列数 13→147），
+    # 消费方（regime_ic.py）按因子名取列并断言 14 个齐全，所以覆盖不会静默改口径；
+    # 需要同时留两份时见 doc/stocks/未做工作清单.md B 组。
+    ic_path = OUT_DIR / "alpha191_ic_series.csv"
+    if args.research:
+        ic_path = freeze_guard.research_name(ic_path)
+    pd.DataFrame(ics).to_csv(ic_path)
+    log(f"逐期 IC 序列 {len(ics)} 列 -> {ic_path}")
     if lay_rows:
         p = OUT_DIR / "alpha191_layers_summary.csv"
+        if args.research:
+            p = freeze_guard.research_name(p)
         pd.DataFrame(lay_rows).to_csv(p, index=False)
         log(f"分层绩效（{len(lay_rows)} 行）-> {p}")
         g5 = [r for r in lay_rows if r["组"] == "G5"]

@@ -12,8 +12,9 @@
                  a144 20.4205%（计划 §10.5 报 20.42%）
 
 冻结保护（2026-10-12 补，`freeze_guard.py` + 协议 §9.1）：默认只允许在**冻结快照**上出判据结论 ——
-读面板前先核对 sha256/字节/行数/最大日期/交易日数/标的数，不符即非零退出；`--end` 越过冻结边界
-默认拒绝。要用越界数据/非冻结面板做研究，必须显式 `--research`，产物另落盘并标「研究数据（非独立验证）」。
+读面板前先核对面板 sha256/字节/行数/最大日期/交易日数/标的数与**它所消费的 layers CSV 哈希**，
+不符即非零退出；`--end` 越过冻结边界默认拒绝。要用越界数据/非冻结产物做研究，必须显式
+`--research`，产物另落盘并标「研究数据（非独立验证）」。
 
 用法:
     uv run stocks/layer_judge.py                       # 读 out/layers_*_5g.csv 全部候选（冻结口径）
@@ -143,6 +144,7 @@ def main() -> None:
     ap.add_argument("--end", default=freeze_guard.FREEZE_END,
                     help=f"数据上界；默认 = 冻结边界 {freeze_guard.FREEZE_END}，超过必须加 --research")
     ap.add_argument("--panel", default="", help="面板路径；默认 = 冻结快照")
+    ap.add_argument("--out-dir", default="", help="读 layers CSV 的目录；默认 out/")
     ap.add_argument("--research", action="store_true",
                     help="研究模式：允许越界数据/非冻结面板；产物另落盘并标「非独立验证」")
     ap.add_argument("--out", default="", help="产物路径；默认 out/layer_judge[_research].csv")
@@ -151,6 +153,7 @@ def main() -> None:
 
     self_check()
     split = pd.Timestamp(args.split)
+    out_dir = pathlib.Path(args.out_dir) if args.out_dir else OUT_DIR
     if args.end > freeze_guard.FREEZE_END and not args.research:
         print(f"[judge] 拒绝：--end {args.end} 越过冻结边界 {freeze_guard.FREEZE_END}（协议 §9.1）；"
               f"要用越界数据做研究，加 --research（产物会标为非独立验证）", file=sys.stderr)
@@ -163,10 +166,11 @@ def main() -> None:
         names = [x.strip() for x in args.factors.split(",") if x.strip()]
     else:
         names = sorted(p.name[len("layers_"):-len(f"_{args.groups}g.csv")]
-                       for p in OUT_DIR.glob(f"layers_*_{args.groups}g.csv"))
+                       for p in out_dir.glob(f"layers_*_{args.groups}g.csv"))
         names = [n for n in names if n not in ("momentum20", BASELINE_NAME)]
 
-    base = pd.read_csv(layer_path(BASELINE_NAME, args.groups), parse_dates=["date"]).set_index("date")
+    base = pd.read_csv(layer_path(BASELINE_NAME, args.groups, out_dir),
+                       parse_dates=["date"]).set_index("date")
 
     wide = mom = None
     if args.panel:
@@ -176,12 +180,14 @@ def main() -> None:
     else:
         panel_path = freeze_guard.frozen_panel_path()
     if not args.no_rank:
-        problems = [] if args.research else freeze_guard.verify(panel_path)
+        # 冻结口径的入口：面板 + 它所消费的 layers CSV 一起验（只验面板挡不住「产物被换掉」）
+        problems = ([] if args.research
+                    else freeze_guard.verify(panel_path) + freeze_guard.verify_artifacts(out_dir))
         if problems:
             for m in problems:
                 print(f"[judge] ✗ 冻结校验不过：{m}", file=sys.stderr)
-            print("[judge] 拒绝在非冻结面板上出判据结论（协议 §9.1）；研究用途加 --research",
-                  file=sys.stderr)
+            print("[judge] 拒绝在非冻结面板/非冻结产物上出判据结论（协议 §9.1）；"
+                  "研究用途加 --research", file=sys.stderr)
             sys.exit(1)
         if not panel_path.exists():
             print(f"[judge] 找不到 {panel_path}，跳过 3（研究模式请显式 --panel）", file=sys.stderr)
@@ -192,7 +198,7 @@ def main() -> None:
 
     rows = []
     for name in names:
-        p = layer_path(name, args.groups)
+        p = layer_path(name, args.groups, out_dir)
         if not p.exists():
             print(f"[judge] 缺 {p}，跳过", file=sys.stderr)
             continue
