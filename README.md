@@ -264,7 +264,7 @@ uv run stocks/alpha191.py --only alpha006,alpha014 # 冒烟
 
 思路来自开源项目 [QuantsPlaybook](https://github.com/hugo2046/QuantsPlaybook) 复现的券商金工研报，**只借规则、不引它的框架**（它依赖 qlib / backtrader / jqdata，我们不装）。
 
-前提：我们 panel 里**没有指数**（只有 5223 只股票），所以先 `uv run stocks/index_fetch.py` 把 5 个宽基指数的日线拉到 `stocks/data/index/`。
+前提：我们 panel 里**没有指数**（只有股票，当前 5,476 只），所以先 `uv run stocks/index_fetch.py` 把 5 个宽基指数的日线拉到 `stocks/data/index/`。
 
 ```bash
 uv run stocks/index_fetch.py

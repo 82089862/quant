@@ -102,7 +102,7 @@ def fetch_one_delisted(symbol: str, start: str, end: str) -> pd.DataFrame:
 def fetch_one(symbol: str, start: str, end: str) -> pd.DataFrame:
     """拉一只股票的后复权日线；源无数据返回空表。
 
-    在市股走 akshare（现有 5223 只分片即此口径，不动）；退市股退回新浪直连。
+    在市股走 akshare（现有分片即此口径，不动）；退市股退回新浪直连。
     """
     try:
         df = ak.stock_zh_a_daily(symbol=symbol, start_date=start, end_date=end, adjust="hfq")
