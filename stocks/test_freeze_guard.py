@@ -11,7 +11,7 @@
   ⑧ 端到端：冻结快照上的原有判据结果与已存 out/layer_judge.csv 保持一致
   ⑨ 锚点事实源：`freeze_anchor.json` 与协议 §9.1 表格逐项一致（此前两处手工同步）
   ⑩ 冻结口径消费的 layers CSV：被改 / 缺文件 / 锚点外多出产物 → 能检出
-  ⑪ 端到端：产物被改时判据入口非零退出；factors.py / alpha191.py 同一条闸
+  ⑪ 端到端：产物被改时判据入口非零退出；factors.py / alpha191.py 日期闸（只比日期，不验内容）
 
 用法:
     uv run stocks/test_freeze_guard.py          # 全部（含 ~40s 的端到端复算）
@@ -285,7 +285,8 @@ def t_layer_judge_passes_on_clean_copy(tmp: pathlib.Path) -> None:
 
 @slow_case
 def t_factors_and_alpha191_share_the_gate() -> None:
-    """第 2 步审计的调用链：同一条闸 + 研究模式必须显式 --panel。"""
+    """第 2 步审计的调用链：日期闸（只比日期、不验文件内容；内容闸只有 layer_judge 一处）
+    + 研究模式必须显式 --panel。"""
     r = run("factors.py", "--end", "2026-12-31")
     assert r.returncode == 2 and "越过冻结边界" in (r.stdout + r.stderr), r.stdout + r.stderr
     r = run("factors.py", "--research", "--end", "2026-12-31")

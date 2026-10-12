@@ -92,7 +92,8 @@ def margin_features(margin: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     m["m_short_ratio"] = m["融券余量"] / m["outstanding_share"]
     m["m_shortsell_int"] = m["融券卖出量"] / m["volume"]
     m = m.sort_values(["symbol", "date"])
-    m["m_bal_chg"] = m.groupby("symbol")["融资余额"].pct_change()
+    # shortcut: 个别月缺数据时 pct_change 会跨月，非严格月环比。与 margin_factor.py 同口径（那份先改的）
+    m["m_bal_chg"] = m.groupby("symbol")["融资余额"].pct_change(fill_method=None)
     return m
 
 
