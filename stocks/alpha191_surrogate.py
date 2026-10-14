@@ -67,14 +67,15 @@ DATA_DIR = ROOT / "data"
 OUT_DIR = ROOT / "out"
 REF_CSV = OUT_DIR / "alpha191_ic.csv"
 
-# 本机可用物理内存很紧（WSL 的 vmmem 常驻 ~20GB，实测只剩 1.8GB）：把 DuckDB 钉在小内存
-# 并显式给 spill 目录，否则 capacity.build_features 的全panel窗口查询会 OS 级 OOM。
-# 这两条只影响本脚本的 DuckDB 会话，不改任何既有文件。
-duckdb.execute("SET memory_limit = '1400MB'")
+# 不钉 memory_limit：实测钉 1400MB 会改变 capacity.build_features 的末位，经 11 个共线
+# 控制变量的病态回归放大到 1e-8 量级（2026-10-14 实测：alpha015 全 11 残差 IC 不钉 vs 钉
+# 差 5.3e-8），与本脚本对账所用的 alpha191_ic.csv 不同源。而且它挡不住真正的 OOM ——
+# 2026-10-14 那次失败死在 pandas 的 load_wide（119MiB 都拿不到），不是 DuckDB。
+# 只留 spill 目录。
 _DUCK_TMP = DATA_DIR / ".duckdb_tmp"
 _DUCK_TMP.mkdir(parents=True, exist_ok=True)
 duckdb.execute(f"SET temp_directory = '{_DUCK_TMP.as_posix()}'")
-log(f"[surrogate] DuckDB memory_limit=1400MB，spill -> {_DUCK_TMP}")
+log(f"[surrogate] DuckDB 未钉 memory_limit（对账要求同链路），spill -> {_DUCK_TMP}")
 
 SPLIT = "2020-12-31"
 SEED = 20261013

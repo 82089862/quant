@@ -610,7 +610,10 @@ def build_orth_inputs(panel_path: pathlib.Path, me: pd.DatetimeIndex):
             for c in dom.CONTROLS}
     masks = np.zeros((len(dom.CONTROLS) + 2, len(dom.CONTROLS)), dtype=bool)
     for j in range(len(dom.CONTROLS)):
-        masks[j, j] = True                      # 单控制变量
+        masks[1 + j, j] = True                  # 单控制变量。行 0 必须留给「无控制」：
+        #                                          orth_verdict 是按 [1:-1] 取单控制的，
+        #                                          原先写成 masks[j, j] 会让 ret1 漏检、
+        #                                          且 verdict_why 点名的变量整体错位一格
     masks[-1] = True                            # 全 11 个
     # masks[0] 全 0 = 无控制，用来和 ic_series 对账
     return ctrl, masks
@@ -830,10 +833,11 @@ def main() -> None:
     if args.research and not args.out:
         path = freeze_guard.research_name(path)
     out.to_csv(path, index=False)
-    # 逐期 IC 序列落盘。shortcut: 全量跑会覆盖这份 13 因子版（列数 13→147），
-    # 消费方（regime_ic.py）按因子名取列并断言 14 个齐全，所以覆盖不会静默改口径；
-    # 需要同时留两份时见 doc/stocks/未做工作清单.md B 组。
-    ic_path = OUT_DIR / "alpha191_ic_series.csv"
+    # 逐期 IC 序列落盘。13 列那份是 regime_ic.py（H12 线）的输入契约——它硬闸
+    # `len(cands.columns) != 13 -> SystemExit`，所以全量跑**不许**写同名文件
+    # （2026-10-14 实测：147 列写进去把自己那条线打断了）。非 13 因子一律另落 _full。
+    ic_path = OUT_DIR / ("alpha191_ic_series.csv" if len(ics) == 13
+                         else "alpha191_ic_series_full.csv")
     if args.research:
         ic_path = freeze_guard.research_name(ic_path)
     pd.DataFrame(ics).to_csv(ic_path)
