@@ -93,7 +93,7 @@ quant/
 | `stocks/regime_ic.py` | H12 外部状态条件回归：14 因变量 × 6 状态 OLS + 窗口内循环平移 surrogate + Bonferroni 五档判定（F1/F2/F4/F5），写 `out/regime_ic.csv`（84 行）。2026-10-13 归档：84 对全 F1 |
 | `doc/研究方法与验证协议.md` | 上述证伪型测试的**共同方法论**（跨域通用）；§12 写明适用边界（对哪类交易友好 / 不适用什么） |
 | `doc/死因码表.md` | F1~F5 死因码，**两域共用**，失败后跨域查重 |
-| `ledger.py` | agent 意图台账（SQLite `doc/agent-ledger.db`，本机不进 git）：`add` / `list` / `show` / `update` / `codes` / `export` / `selftest` |
+| `ledger.py` | agent 意图台账（SQLite `doc/agent-ledger.db`，本机不进 git）：`add` / `list` / `show` / `update` / `codes` / `export` / `extract`（从会话库抽历史消息） / `import`（批量补录） / `selftest` |
 | `doc/agent-ledger.md` | 台账契约：两类条目（`目标` / `断点`）、D 码表、更正流程。**记的是 agent 对用户消息的理解，不是原话** |
 | `doc/stocks/假设登记表.md` | 股票域假设记录块（ID 用 `H`） |
 | `doc/stocks/Alpha191候选分层回测计划.md` | 把 14 个「部分独立」候选从「有 IC」推进到「有净值+月胜率」的实施计划（最小改动 + 事先判据 + 状态表） |

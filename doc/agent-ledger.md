@@ -13,6 +13,12 @@
 
 粒度：以**条目**为单位。一条用户消息可以产生 0 到 N 条；条目上带用户**消息时刻** `ts_msg`。
 
+判定判据（2026-10-14 定，回溯补录时生效）：
+
+- `目标` 只记**用户发起、有产物**的作业；信息询问不记（「这个目录下是什么」「你是用什么逻辑在跑」），追问细节也不记。
+- `断点` 必须**我先给出明确选项集、用户明确拍了**才记；我给了选项但用户没答（改题、不回）也记一条，`chosen` 写「未选 + 实际走向」。
+- 一条用户消息可以同时产出一条 `目标` 和一条 `断点`（用户改题：既发起新任务，又把前面的选项挂起）。
+
 ## 2. 什么时候写
 
 - `目标`：理解完目标、准备动手前写。
@@ -37,8 +43,9 @@
 | `impact` | 否 | 可逆 / 不可逆 + 影响面 |
 | `code` | 断点 | D 码，见 §4 |
 | `outcome` | 否 | 事后实况（回填） |
-| `status` | 自动 | `已定` / `已回填` / `已更正` |
+| `status` | 自动 | `已定` / `已回填` / `已更正`（回溯补录的条目落 `已回填`） |
 | `corrected_by` | 否 | 更正条目的 id |
+| `src` | 否 | 来源锚点 `<会话 id 前 13 位>#<消息序号>`，供去重与追溯 |
 
 约定：每个值**单行**，要换行用 `<br>`（与 `stocks/假设登记表.md` 同约定）。
 
@@ -78,12 +85,32 @@ uv run ledger.py show L12
 uv run ledger.py update L12 --outcome "..." --status 已回填
 uv run ledger.py codes
 uv run ledger.py export --csv doc/agent-ledger.csv
+uv run ledger.py extract --session 01a12402 --compact   # 从会话库抽历史消息供判读
+uv run ledger.py import --jsonl entries.jsonl          # 批量补录（默认 status=已回填）
 uv run ledger.py selftest
 ```
 
 长文本用 `@stdin` 从标准输入读：`--understood @stdin`。
 
-## 7. 边界
+## 7. 历史回溯补录
+
+历史会话库（`~/.pi/agent/pi-hermes-memory/sessions.db`）只有 user 原话 + assistant 回复，**没有 agent 理解字段**。所以回填不是导数据，是**重新判读**。
+
+流程：
+
+1. `ledger.py extract --root D:/quant --min-user 5` → 每个会话一份 jsonl（消息走 stdout，摘要走 stderr）
+2. `--compact` 换成便于判读的 md：user 全留 + 紧邻其前的 assistant（选项集都在这条里）
+3. agent 逐会话判读 → 写 jsonl（键名同 `add` 参数）
+4. `ledger.py import --jsonl entries.jsonl`
+5. 抽查：`ledger.py list --status 已回填`
+
+规则（2026-10-14 拍板，用户「都按默认走」）：
+
+- `understood` 前缀标 `[回溯]`；理解以**当时的 assistant 回复**为准
+- `src` 指向会话库原始消息；本轮会话自己不入回填（已由 L1-L5 覆盖）
+- 回填条目 `status=已回填`，`ts_msg` 用**用户消息的真实时刻**（不是补录时刻）
+
+## 8. 边界
 
 - `doc/agent-ledger.db` 被 `.gitignore` 排除：二进制文件 + 本仓有并发写手，进 git 必冲突。
 - 本台账记的是 **agent 工作过程**，不是研究结论。研究结论仍归 `假设登记表.md`、协议、死因码表。

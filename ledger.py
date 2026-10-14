@@ -46,7 +46,7 @@ CODE_SET = {c for c, _, _ in CODES}
 
 FIELDS = ("ts_msg", "ts_record", "type", "domain", "title", "understood",
           "options", "chosen", "rationale", "line", "impact", "code",
-          "outcome", "status", "corrected_by")
+          "outcome", "status", "corrected_by", "src")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +55,10 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS ledger (
   title TEXT NOT NULL, understood TEXT NOT NULL,
   options TEXT, chosen TEXT, rationale TEXT,
   line TEXT, impact TEXT, code TEXT,
-  outcome TEXT, status TEXT NOT NULL DEFAULT '已定', corrected_by INTEGER)"""
+  outcome TEXT, status TEXT NOT NULL DEFAULT '已定', corrected_by INTEGER,
+  src TEXT)"""
+
+SESSIONS_DB = Path.home() / ".pi" / "agent" / "pi-hermes-memory" / "sessions.db"
 
 
 # ---------------------------------------------------------------- 基础
@@ -69,6 +72,14 @@ def die(msg: str, code: int = 2) -> None:
     raise SystemExit(code)
 
 
+def _migrate(c: sqlite3.Connection) -> None:
+    """旧库补列（幂等）。"""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(ledger)")}
+    if "src" not in cols:
+        c.execute("ALTER TABLE ledger ADD COLUMN src TEXT")
+    c.commit()
+
+
 def con(create: bool = False) -> sqlite3.Connection:
     if create:
         DB.parent.mkdir(parents=True, exist_ok=True)
@@ -76,9 +87,8 @@ def con(create: bool = False) -> sqlite3.Connection:
         die(f"台账不存在: {DB}")
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
-    if create:
-        c.executescript(SCHEMA)
-        c.commit()
+    c.executescript(SCHEMA)
+    _migrate(c)
     return c
 
 
@@ -134,8 +144,9 @@ def cmd_add(a) -> None:
         "impact": val(a.impact),
         "code": a.code,
         "outcome": val(a.outcome),
-        "status": "已定",
+        "status": getattr(a, "status", None) or "已定",
         "corrected_by": None,
+        "src": a.src,
     }
     if rec["type"] not in TYPES:
         die(f"--type 必须取 {TYPES}")
@@ -208,8 +219,11 @@ def cmd_update(a) -> None:
     if a.corrected_by is not None:
         sets.append("corrected_by=?")
         args.append(parse_id(a.corrected_by))
+    if a.src is not None:
+        sets.append("src=?")
+        args.append(a.src)
     if not sets:
-        die("update 至少给一个 --outcome / --status / --corrected-by")
+        die("update 至少给一个 --outcome / --status / --src / --corrected-by")
     args.append(rid)
     c = con()
     cur = c.execute(f"UPDATE ledger SET {','.join(sets)} WHERE id=?", args)
@@ -251,7 +265,7 @@ def cmd_selftest(_a) -> None:
     def ns(**kw):
         base = dict(type="断点", domain="stocks", title="t", understood="u",
                     options="A/B", chosen="A", rationale="r", line="l",
-                    impact="i", code="D1", outcome=None, ts_msg=None)
+                    impact="i", code="D1", outcome=None, ts_msg=None, src=None)
         base.update(kw)
         return argparse.Namespace(**base)
 
@@ -283,9 +297,9 @@ def cmd_selftest(_a) -> None:
         rejected("空 understood", ns(understood=""))
         rejected("目标带 options", ns(type="目标", code=None, options="A"))
         ok(cmd_update, argparse.Namespace(ref="L1", outcome="事后", status="已回填",
-                                          corrected_by=None))
-        row = con().execute("SELECT outcome,status FROM ledger WHERE id=1").fetchone()
-        assert (row["outcome"], row["status"]) == ("事后", "已回填"), dict(row)
+                                          corrected_by=None, src="x#3"))
+        row = con().execute("SELECT outcome,status,src FROM ledger WHERE id=1").fetchone()
+        assert (row["outcome"], row["status"], row["src"]) == ("事后", "已回填", "x#3"), dict(row)
         n += 1
         seen = io.StringIO()
         with redirect_stdout(seen), redirect_stderr(seen):
@@ -300,6 +314,73 @@ def cmd_selftest(_a) -> None:
         print(f"selftest 通过 ({n} 项)")
     finally:
         DB = old
+
+
+def cmd_extract(a) -> None:
+    """从会话库导出历史消息为 jsonl（供判读后补录）。消息走 stdout，摘要走 stderr。"""
+    import json
+    db = Path(a.db) if a.db else SESSIONS_DB
+    if not db.exists():
+        die(f"会话库不存在: {db}")
+    root = a.root.replace("\\", "/").rstrip("/").lower()
+    c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    c.row_factory = sqlite3.Row
+    sess = c.execute(
+        """SELECT s.id, s.started_at,
+                  (SELECT COUNT(*) FROM messages m
+                    WHERE m.session_id = s.id AND m.role = 'user') u
+             FROM sessions s
+            WHERE lower(replace(s.cwd, '\\', '/')) = ?
+            ORDER BY s.started_at""", (root,)).fetchall()
+    picked = [s for s in sess
+              if (not a.session or s["id"].startswith(a.session))
+              and s["u"] >= (a.min_user or 0)]
+    if not picked:
+        die("没有匹配的会话")
+    for s in picked:
+        msgs = c.execute(
+            """SELECT role, content, timestamp, tool_calls FROM messages
+                WHERE session_id = ? ORDER BY timestamp, rowid""", (s["id"],)).fetchall()
+        print(f"{s['id'][:13]}  {s['started_at'][:16]}  {len(msgs)} msgs / {s['u']} user",
+              file=sys.stderr)
+        if a.compact:
+            keep = {i - 1 for i, m in enumerate(msgs) if m["role"] == "user"}
+            keep |= {i for i, m in enumerate(msgs) if m["role"] == "user"}
+            for i, m in enumerate(msgs):
+                t = (m["content"] or "").replace("\n", " ").strip()
+                if m["role"] == "user":
+                    print(f"\n[{i}] === U === {t}")
+                elif i in keep:
+                    print(f"[{i}] A: {t}")
+                else:
+                    print(f"[{i}] A: {t[:50]} ...")
+            continue
+        for i, m in enumerate(msgs):
+            print(json.dumps({"sid": s["id"][:13], "seq": i, "ts": m["timestamp"],
+                              "role": m["role"], "tools": bool(m["tool_calls"]),
+                              "content": m["content"]}, ensure_ascii=False))
+    print(f"--- {len(picked)} 个会话 ---", file=sys.stderr)
+
+
+def cmd_import(a) -> None:
+    """批量导入条目（jsonl，键名同 add 的参数）。默认 status=已回填。"""
+    import json
+    blank = dict.fromkeys(("ts_msg", "type", "domain", "title", "understood", "options",
+                           "chosen", "rationale", "line", "impact", "code", "outcome",
+                           "src", "status"))
+    n = 0
+    for ln, line in enumerate(Path(a.jsonl).read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        rec = dict(blank)
+        rec.update(json.loads(line))
+        rec["status"] = rec["status"] or "已回填"
+        try:
+            cmd_add(argparse.Namespace(**rec))
+        except SystemExit:
+            die(f"第 {ln} 行未通过校验，已写入 {n} 条")
+        n += 1
+    print(f"导入 {n} 条")
 
 
 # ---------------------------------------------------------------- 入口
@@ -330,6 +411,7 @@ def main() -> None:
         q.add_argument("--code", help=f"D 码（仅断点）：{'/'.join(CODE_SET)}")
         q.add_argument("--outcome", help="事后实况（也可之后 update 回填）")
         q.add_argument("--ts-msg", help="用户消息时刻（ISO），默认取落盘时刻")
+        q.add_argument("--src", help="来源锚点 <会话id前13位>#<消息序号>")
 
     q = sub.add_parser("add", help="追加一条")
     add_flags(q)
@@ -351,6 +433,7 @@ def main() -> None:
     q = sub.add_parser("update", help="回填事后 / 改状态 / 挂更正")
     q.add_argument("ref")
     q.add_argument("--outcome", help="@stdin 可读标准输入")
+    q.add_argument("--src")
     q.add_argument("--status", choices=STATUSES)
     q.add_argument("--corrected-by", help="更正条的 id")
     q.set_defaults(func=cmd_update)
@@ -362,6 +445,19 @@ def main() -> None:
     q.set_defaults(func=cmd_export)
 
     sub.add_parser("selftest", help="自检").set_defaults(func=cmd_selftest)
+
+    q = sub.add_parser("extract", help="从会话库导出历史消息 jsonl（补录用）")
+    q.add_argument("--root", default="D:/quant", help="项目 cwd，默认 D:/quant")
+    q.add_argument("--db", help="会话库路径，默认 pi-hermes-memory/sessions.db")
+    q.add_argument("--session", help="只导这个会话（id 前缀）")
+    q.add_argument("--min-user", type=int, default=0, help="跳过 user 消息少于 N 条的会话")
+    q.add_argument("--compact", action="store_true",
+                   help="不输出 jsonl，输出便于判读的 md（user 全留 + 紧邻其前的 assistant）")
+    q.set_defaults(func=cmd_extract)
+
+    q = sub.add_parser("import", help="批量导入条目 jsonl（补录用，默认 status=已回填）")
+    q.add_argument("--jsonl", required=True)
+    q.set_defaults(func=cmd_import)
 
     a = p.parse_args()
     a.func(a)
