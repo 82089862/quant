@@ -9,13 +9,17 @@
      逐位一致（相对 <= 1e-9）；
   ② 每期有效成分数 <= 名单数且 > 0；
   ③ 调仓期数 = 142；
-  ④ §16 口径 4 的校准：超额口径集中度对 5 个单因子复算必须复现 §14.1.1 的表（±0.01）。
+  ④ §16 口径 4 的校准：超额口径集中度对 5 个单因子复算必须复现 §14.1.1 的表（±0.01）；
+  ⑤ §17 口径 4：layer_judge.self_check() 口径锚点（a144 去均值相关 0.350）通过。
+
+组合跑满 5 层是为了 §17 的换皮检查（判据② 需要 5 组，不能只用 G5）。
 
 用法:
     uv run stocks/combo_check.py              # 冻结口径
     uv run stocks/combo_check.py --research
 
-产物: out/combo_layers_<名>_5g.csv + out/combo_summary.csv + out/combo_yearly.csv
+产物: out/combo_layers_<名>_5g.csv（date × G1..G5）+ out/combo_summary.csv（含去均值相关/换皮判定）
+      + out/combo_yearly.csv
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ sys.path.insert(0, str(ROOT))
 import factors  # noqa: E402
 import freeze_guard  # noqa: E402
 import impact_check as ic  # noqa: E402
+import layer_judge as judge  # noqa: E402
 import portfolio_check as pc  # noqa: E402
 import store  # noqa: E402
 
@@ -43,6 +48,7 @@ CONC_EXCESS_REF = {"alpha015": 0.53, "alpha042": 0.29, "alpha139": 0.52,
                    "alpha144": 0.49, "alpha164": 0.45}
 CONC_TOL = 0.01
 C3 = ("alpha042", "alpha139", "alpha144")      # §16 口径 2：事后选的子集，只作对照
+CORR_LIMIT = 0.8                                # §17 口径 3：去均值相关 ≥ 0.8 → F3
 
 
 def log(msg: str) -> None:
@@ -65,13 +71,21 @@ def mean_members(ranks: list[pd.DataFrame], dates: pd.DatetimeIndex) -> float:
     return float(cnt.loc[factors.month_end_dates(dates)].mean(axis=1).mean())
 
 
-def run_g5(fac: pd.DataFrame, panel: pd.DataFrame, dates: pd.DatetimeIndex,
-           delist: dict) -> tuple[pd.Series, dict]:
-    """只跑 G5 层（省掉用不上的 4 层），返回 (日频净值, 绩效)。"""
-    sched = factors.build_schedule(fac, GROUPS, dates)[G5]
-    eq, tr = factors.backtest.run_portfolio(panel, sched, cash0=factors.CASH0,
-                                            lot_size=1, delist_dates=delist)
-    return eq.set_index("date")["equity"], factors.curve_stats(eq, tr, factors.CASH0)
+def run_layers(fac: pd.DataFrame, panel: pd.DataFrame, dates: pd.DatetimeIndex, delist: dict,
+               only: int | None = None) -> tuple[pd.DataFrame, dict]:
+    """分层回测 -> (date × G1..G5 的日频净值, G5 绩效)。only=n 只跑第 n 层（省时用）。
+
+    §17 的换皮检查要 5 层，硬闸① 只要 G5 一层，所以同一函数按 only 复用。
+    """
+    sched = factors.build_schedule(fac, GROUPS, dates)
+    cols, st = {}, {}
+    for g in ([only] if only else range(1, GROUPS + 1)):
+        eq, tr = factors.backtest.run_portfolio(panel, sched[g - 1], cash0=factors.CASH0,
+                                                lot_size=1, delist_dates=delist)
+        cols[f"G{g}"] = eq.set_index("date")["equity"]
+        if g == GROUPS:
+            st = factors.curve_stats(eq, tr, factors.CASH0)
+    return pd.DataFrame(cols), st
 
 
 def main() -> None:
@@ -92,6 +106,13 @@ def main() -> None:
         log("拒绝在非冻结面板/非冻结产物上出读数（协议 §9.1）；研究用途加 --research")
         sys.exit(2)
 
+    # 硬闸⑤（§17 口径 4）：口径漂移锚点，不过立刻退出，不浪费后面 11 层回测
+    try:
+        judge.self_check()
+    except AssertionError as exc:
+        log(f"[X] 硬闸⑤ 不过：{exc}")
+        sys.exit(1)
+
     names = tuple(pc.passing_candidates(out_dir))
     log(f"候选名单（layer_judge.csv 判定==通过）：{', '.join(names)}")
     wide = ic.alpha191.load_wide(panel_path, None)
@@ -99,6 +120,8 @@ def main() -> None:
     delist = store.delist_dates(panel["symbol"].unique())
     dates = wide["close"].index
     base = pc.load_curve(pc.layer_path(pc.BASELINE, GROUPS, out_dir))
+    base_layers = pd.read_csv(pc.layer_path(pc.BASELINE, GROUPS, out_dir),
+                              parse_dates=["date"]).set_index("date")
     yb = pc.year_returns(base)
     bench = {k: pc.index_curve(pc.DATA_DIR / "index" / f) for k, f in pc.BENCH.items()}
     bench["equal"] = pc.equal_weight_curve(panel_path)
@@ -106,7 +129,9 @@ def main() -> None:
     log("基准：" + " / ".join(f"{k}({pc.g5_annual(v):+.2%})" for k, v in bench.items()))
 
     # 硬闸①：合成管线跑单因子 alpha139，必须复现 layers CSV
-    g_gate, _ = run_g5(combo_factor(combo_ranks(("alpha139",), wide)), panel, dates, delist)
+    gate, _ = run_layers(combo_factor(combo_ranks(("alpha139",), wide)), panel, dates, delist,
+                         only=G5 + 1)
+    g_gate = gate["G5"]
     ref139 = pc.load_curve(pc.layer_path("alpha139", GROUPS, out_dir))
     gap = float((g_gate.reindex(ref139.index) - ref139).abs().max() / ref139.abs().mean())
     if not (gap <= GATE_TOL):
@@ -136,8 +161,10 @@ def main() -> None:
         n_eff = mean_members(ranks, dates)
         if not (0 < n_eff <= len(members)):
             problems.append(f"{cname}: 每期有效成分数均值 {n_eff} 越界（名单 {len(members)}）")
-        g5, st = run_g5(fac, panel, dates, delist)
-        pd.DataFrame({"G5": g5}).to_csv(out_dir / f"combo_layers_{cname}_5g.csv")
+        layers, st = run_layers(fac, panel, dates, delist)
+        g5 = layers["G5"]
+        corr2 = judge.corr_demeaned(layers, base_layers)   # §17 判据②
+        layers.to_csv(out_dir / f"combo_layers_{cname}_5g.csv")
         if len(st) and st["月数"] != N_MONTHS - 1:
             problems.append(f"{cname}: 月数 {st['月数']} != {N_MONTHS - 1}")
 
@@ -158,6 +185,9 @@ def main() -> None:
             "集中度": pc.concentration(fy), "集中度_超额_基线": pc.concentration(exc),
             "平均成分数": n_eff, "月数": st["月数"], "最高相关_单因子": top,
             "最高相关": corrs[top],
+            "去均值相关": corr2,
+            "换皮判定": ("非换皮" if corr2 < CORR_LIMIT else "F3(换皮)") if np.isfinite(corr2)
+                        else "NA",
             **{f"相关_{n}": corrs[n] for n in names}})
         for y in yr.index:
             row = {"组合": cname, "year": int(y), "G5": float(yr[y]),
@@ -170,7 +200,7 @@ def main() -> None:
             f"回撤 {st['最大回撤']:.1%} 集中度 {pc.concentration(fy):.2f}"
             f"/超额 {pc.concentration(exc):.2f} 超额年数 A {n_a}/11 "
             f"B(300) {n_b['hs300']}/11 B(等权) {n_b['equal']}/11 "
-            f"与 {top} 相关 {corrs[top]:+.2f}")
+            f"去均值相关(判据②) {corr2:+.3f} 与 {top} 相关 {corrs[top]:+.2f}")
 
     pd.DataFrame(rows).to_csv(out_dir / "combo_summary.csv", index=False)
     pd.DataFrame(years).to_csv(out_dir / "combo_yearly.csv", index=False)
