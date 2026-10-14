@@ -3,3 +3,4 @@ data/
 out/
 __pycache__/
 tools/
+doc/agent-ledger.db*

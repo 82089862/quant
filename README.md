@@ -36,9 +36,11 @@ uv run stocks/import_mysql.py verify   # 行数 + 分区 + 抽样比对 parquet
 
 ```
 quant/
+  ledger.py                          agent 意图台账工具（目标/断点两类，契约见 doc/agent-ledger.md）
   doc/                               全域通用
     研究方法与验证协议.md             证伪型测试的共同逻辑（五环节 + 已实测失败案例总表 + §12 适用边界）
     死因码表.md                       F1~F5 死因码，两域共用、跨域查重
+    agent-ledger.md                   agent 意图台账契约（用户提的目标 / 用户拍板的断点）
     stocks/假设登记表.md              股票域假设记录块（ID 用 H）
     stocks/外部状态条件回归计划.md    外部宏观状态 → 因子 IC 条件回归（已执行并归档：84 对全 F1）
     stocks/未做工作清单.md            股票域待做工作的唯一事实源
@@ -91,6 +93,8 @@ quant/
 | `stocks/regime_ic.py` | H12 外部状态条件回归：14 因变量 × 6 状态 OLS + 窗口内循环平移 surrogate + Bonferroni 五档判定（F1/F2/F4/F5），写 `out/regime_ic.csv`（84 行）。2026-10-13 归档：84 对全 F1 |
 | `doc/研究方法与验证协议.md` | 上述证伪型测试的**共同方法论**（跨域通用）；§12 写明适用边界（对哪类交易友好 / 不适用什么） |
 | `doc/死因码表.md` | F1~F5 死因码，**两域共用**，失败后跨域查重 |
+| `ledger.py` | agent 意图台账（SQLite `doc/agent-ledger.db`，本机不进 git）：`add` / `list` / `show` / `update` / `codes` / `export` / `selftest` |
+| `doc/agent-ledger.md` | 台账契约：两类条目（`目标` / `断点`）、D 码表、更正流程。**记的是 agent 对用户消息的理解，不是原话** |
 | `doc/stocks/假设登记表.md` | 股票域假设记录块（ID 用 `H`） |
 | `doc/stocks/Alpha191候选分层回测计划.md` | 把 14 个「部分独立」候选从「有 IC」推进到「有净值+月胜率」的实施计划（最小改动 + 事先判据 + 状态表） |
 | `doc/stocks/外部状态条件回归计划.md` | 外部宏观状态 → 因子 IC 条件回归的实施计划（6 自变量 × 14 因变量 = 84 次检验；先登记 H12 再跑；2026-10-13 已执行并归档：84 对全 F1） |
