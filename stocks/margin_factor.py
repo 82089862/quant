@@ -175,6 +175,8 @@ def main() -> None:
     ap.add_argument("--split", default="2020-12-31")
     ap.add_argument("--surrogate", type=int, default=300)
     ap.add_argument("--alpha", type=float, default=0.05)
+    ap.add_argument("--skip-live", action="store_true",
+                    help="跳过实盘口径分层回测（走引擎，较慢）")
     args = ap.parse_args()
 
     panel_path = pathlib.Path(args.panel)
@@ -283,6 +285,30 @@ def main() -> None:
               f"  多空 {spread:+.3%}/月  t={t:+.2f}   {'<- 过检' if name in passed else ''}")
 
     OUT_DIR.mkdir(exist_ok=True)
+
+    if not args.skip_live:
+        # 实盘口径：复用回测引擎 —— 信号日=月末（两融明细**盘后**公布），执行日=**下一交易日开盘**，
+        # 扣费、涨跌停不成交、退市股在退市日之后归零。
+        # 上面那个「分层收益」是 月末收盘 -> 下月末收盘，隐含「在信号日收盘成交」——那是盘后信息，
+        # 实盘做不到（等价于偷 1 天）；而且绕开引擎就漏了退市归零。
+        print("\n-- 实盘口径分层回测（月末信号 -> 次日开盘成交，扣费，退市归零）--")
+        panel = factors.load_prices(panel_path)
+        dates = pd.DatetimeIndex(closes.index)
+        live_rows = []
+        for name in FACTORS:
+            fac = fp.pivot(index="date", columns="symbol", values=name)
+            _, stats = factors.run_layers(fac, panel, dates, 5)
+            g1, g5 = stats[0], stats[4]
+            spread = g5["年化"] - g1["年化"]
+            print(f"  {name:<16s} G1 {g1['年化']:+.3%}  G5 {g5['年化']:+.3%}"
+                  f"  G5-G1 {spread:+.3%}/年  夏普 {g5['年化夏普']:+.2f}"
+                  f"  回撤 {g5['最大回撤']:+.1%}  {'<- 过检' if name in passed else ''}")
+            live_rows.append({"factor": name, "G1年化": g1["年化"], "G5年化": g5["年化"],
+                              "G5减G1年化": spread, "G5夏普": g5["年化夏普"],
+                              "G5最大回撤": g5["最大回撤"], "G5年换手双边": g5["年换手双边"]})
+        pd.DataFrame(live_rows).to_csv(OUT_DIR / "margin_factor_live.csv", index=False)
+        print(f"  -> {OUT_DIR}/margin_factor_live.csv")
+
     res.to_csv(OUT_DIR / "margin_factor_ic.csv", index=False)
     pd.DataFrame(curves).to_csv(OUT_DIR / "margin_factor_ic_series.csv")
     print(f"\n[mfac] 明细 -> {OUT_DIR}/margin_factor_ic*.csv")

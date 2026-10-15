@@ -101,9 +101,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", type=float, default=25.0)
     ap.add_argument("--step", type=int, default=3, help="抽样日期里每 N 个取 1 个")
+    ap.add_argument("--fetch-daily", action="store_true",
+                    help="只抓全交易日两融明细到缓存（供日频口径用），不做 PR 探针")
     args = ap.parse_args()
 
     panel_path = DATA_DIR / "panel_2015_2026.parquet"
+
+    # 日频口径（两融 shift(1) / 换口径重验）需要全交易日的两融明细，不是抽样日；按日缓存、可断点续抓
+    if args.fetch_daily:
+        days = pd.to_datetime(duckdb.sql(
+            f"select distinct date from read_parquet('{panel_path.as_posix()}') order by date"
+        ).df()["date"])
+        fetch_margin(list(days), CACHE_DIR)
+        return
+
     all_days = capacity.sample_dates(panel_path, args.sample)
     days = all_days[::args.step]
     print(f"[margin] 抽样 {len(all_days)} 个交易日，每 {args.step} 取 1 -> {len(days)} 个")
