@@ -38,10 +38,17 @@ def fetch_one(day: pd.Timestamp, cache_dir: pathlib.Path,
 
     cache = cache_dir / f"{day:%Y%m%d}.parquet"
     if cache.exists():
-        return pd.read_parquet(cache)
+        # 0 行 / 损坏的缓存当没有：早期版本把抓取失败也落了盘，靠这里自愈
+        try:
+            cached = pd.read_parquet(cache)
+        except Exception:
+            cached = None
+        if cached is not None and len(cached):
+            return cached
 
     ymd = f"{day:%Y%m%d}"
     frames = []
+    n_fail = 0
     for exch, fn, code_col in (
         ("sh", ak.stock_margin_detail_sse, "标的证券代码"),
         ("sz", ak.stock_margin_detail_szse, "证券代码"),
@@ -57,6 +64,7 @@ def fetch_one(day: pd.Timestamp, cache_dir: pathlib.Path,
                 else:
                     time.sleep(1.0 + attempt)
         if d is None or len(d) == 0:
+            n_fail += 1
             continue
         d = d.rename(columns={code_col: "code"})
         d["symbol"] = exch + d["code"].astype(str).str.zfill(6)
@@ -66,6 +74,10 @@ def fetch_one(day: pd.Timestamp, cache_dir: pathlib.Path,
         time.sleep(sleep)
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
         columns=["date", "symbol", "融资余额", "融资买入额", "融券余量", "融券卖出量"])
+    if n_fail:
+        # 不落盘：落了盘就等于把这个交易日永久标成「已抓」，失败会被静默吞掉
+        print(f"  [{day:%Y-%m-%d}] {n_fail} 个交易所未取到，不写缓存（下次会重抓）")
+        return out
     cache_dir.mkdir(parents=True, exist_ok=True)
     out.to_parquet(cache, index=False)
     return out
