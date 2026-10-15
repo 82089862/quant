@@ -38,13 +38,17 @@ def fetch_one(day: pd.Timestamp, cache_dir: pathlib.Path,
 
     cache = cache_dir / f"{day:%Y%m%d}.parquet"
     if cache.exists():
-        # 0 行 / 损坏的缓存当没有：早期版本把抓取失败也落了盘，靠这里自愈
+        # 0 行 / 损坏 / 只含一个交易所的缓存都当没有：早期版本把抓取失败也落了盘，
+        # 靠这里自愈（实测 2026-10-15 有 22 天只剩 sz，融资余额合计因此单日掉 60%+）
         try:
             cached = pd.read_parquet(cache)
         except Exception:
             cached = None
         if cached is not None and len(cached):
-            return cached
+            pref = set(cached["symbol"].astype(str).str[:2].unique())
+            if {"sh", "sz"} <= pref:
+                return cached
+            print(f"  [{day:%Y-%m-%d}] 缓存只含 {sorted(pref)}，重抓")
 
     ymd = f"{day:%Y%m%d}"
     frames = []

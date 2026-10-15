@@ -88,6 +88,7 @@ quant/
 | `stocks/import_hypothesis.py` | 把 `doc/` 的假设登记表 + 死因码表镜像进 MySQL（`ddl` / `load` / `verify`），单向、重跑覆盖 |
 | `stocks/capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
 | `stocks/margin_probe.py` | 新数据源信息含量实测。融资融券 PR 净增 +1.95 |
+| `stocks/margin_event_probe.py` | 两融「强平事件」原料盘点（口径 A 个股环比跌破阈值 + 对照 C 大盘强平潮）：只出事件频次与事件后收益分布，**不设判据、不判通过失败** |
 | `stocks/margin_factor.py` | 两融因子验证：IC + surrogate + 训练/测试 + 7 档正交性阶梯 |
 | `stocks/dominance.py` | 控制变量子集穷举（2^11）+ 优势分析：排除"过控制"、量化共线分摊 |
 | `stocks/downturn.py` | 尾部传染挖掘：锚点下跌日 -> 候选次日下跌 lift + 多重检验校正 + 样本外 |
