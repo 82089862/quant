@@ -91,7 +91,13 @@ def fetch_margin(days: list[pd.Timestamp], cache_dir: pathlib.Path) -> pd.DataFr
         frames.append(fetch_one(d, cache_dir))
         if i % 20 == 0 or i == len(days):
             print(f"[margin] {i}/{len(days)}")
-    return pd.concat(frames, ignore_index=True)
+    frames = [f for f in frames if len(f)]
+    if not frames:
+        return pd.DataFrame(columns=["date", "symbol"])
+    out = pd.concat(frames, ignore_index=True)
+    # 缓存读回是 datetime64[us]、新抓的是 [ns]，混在一起会退化成 object（merge 时才会报错）
+    out["date"] = pd.to_datetime(out["date"])
+    return out
 
 
 def margin_features(margin: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
