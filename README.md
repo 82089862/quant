@@ -44,7 +44,8 @@ quant/
     stocks/假设登记表.md              股票域假设记录块（ID 用 H）
     stocks/外部状态条件回归计划.md    外部宏观状态 → 因子 IC 条件回归（已执行并归档：84 对全 F1）
     stocks/未做工作清单.md            股票域待做工作的唯一事实源
-    stocks/阶段性报告.md              起始猜想（跨股票联动）与后续换道的全部读数汇总（2026-10-15 快照，不替代任何事实源）
+    stocks/阶段性报告.md              起始猜想（跨股票联动）与后续换道的全部读数汇总（2026-10-15 快照，不替代任何事实源；§8 为 2026-10-16 更正记录）
+    stocks/两融事件口径_年度分布审查.md  两融事件口径的年度 / 时段分布（2026-10-16，证据修复；不是判据）
     stocks/基本面数据源计划.md        换数据（基本面）的漏斗计划：六步 + 每步终止条件（2026-10-15 建立，第 0 步未开始，待外部审阅）
     power/假设登记表.md               电力域假设记录块（ID 用 P）
   stocks/                            股票域
@@ -91,6 +92,7 @@ quant/
 | `stocks/capacity.py` | 信息容量盘点。8 个数值列 -> 有效维度 7.5，新想法投影算 R² 判重 |
 | `stocks/margin_probe.py` | 新数据源信息含量实测。融资融券 PR 净增 +1.95 |
 | `stocks/margin_event_probe.py` | 两融「强平事件」原料盘点（口径 A 个股环比跌破阈值 + 对照 C 大盘强平潮）：只出事件频次与事件后收益分布，**不设判据、不判通过失败** |
+| `stocks/margin_event_yearly.py` | 两融事件口径的年度 / 时段分布（证据修复）：import `margin_event_probe.py` 的 SQL 保证同源，自检与 `out/margin_event_probe.csv` **逐位一致**；落 `out/margin_event_yearly.csv` + `out/margin_event_periods.csv`。**不设判据** |
 | `stocks/margin_factor.py` | 两融因子验证：IC + surrogate + 训练/测试 + 7 档正交性阶梯 |
 | `stocks/dominance.py` | 控制变量子集穷举（2^11）+ 优势分析：排除"过控制"、量化共线分摊 |
 | `stocks/downturn.py` | 尾部传染挖掘：锚点下跌日 -> 候选次日下跌 lift + 多重检验校正 + 样本外 |
